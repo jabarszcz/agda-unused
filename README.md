@@ -17,7 +17,7 @@ flag, `agda-unused` treats the given file as a description of the public
 interface of the project, and additionally checks for unused files and unused
 public items in dependencies. (See below for more on `--global`.)
 
-Supported Agda versions: `>= 2.6.3 && < 2.6.4`
+Supported Agda versions: `>= 2.8.0 && < 2.8.1`
 
 ## Example
 
@@ -49,11 +49,11 @@ $ agda-unused Test.agda
 Output:
 
 ```
-/home/user/Test.agda:4,23-27
+/home/user/Test.agda:4.23-27
   unused imported item ‘true’
-/home/user/Test.agda:5,1-30
+/home/user/Test.agda:5.1-30
   unused import ‘Agda.Builtin.Unit’
-/home/user/Test.agda:11,9-10
+/home/user/Test.agda:11.9-10
   unused variable ‘x’
 ```
 
@@ -142,9 +142,9 @@ drawbacks:
 
 Additionally, we currently do not support the following Agda features:
 
-- [record module instance applications](https://agda.readthedocs.io/en/v2.6.2/language/module-system.html#parameterised-modules)
-- [unquoting declarations](https://agda.readthedocs.io/en/v2.6.2/language/reflection.html#id3)
-- [lone constructors](https://agda.readthedocs.io/en/v2.6.2/language/mutual-recursion.html#interleaved-mutual-blocks)
+- [record module instance applications](https://agda.readthedocs.io/en/v2.8.0/language/module-system.html#parameterised-modules)
+- [unquoting declarations](https://agda.readthedocs.io/en/v2.8.0/language/reflection.html#id3)
+- [lone constructors](https://agda.readthedocs.io/en/v2.8.0/language/mutual-recursion.html#interleaved-mutual-blocks)
 
 `agda-unused` will produce an error if your code uses these language features.
 

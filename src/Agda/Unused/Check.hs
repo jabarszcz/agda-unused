@@ -44,13 +44,21 @@ import Agda.Unused.Utils
   (liftMaybe, mapLeft)
 
 import Agda.Interaction.FindFile
-  (findFile'', srcFilePath)
+  (SourceFile(..), findFile'')
+import Agda.TypeChecking.Monad.Base
+  (ModuleToSource(..), FileDictWithBuiltins(..))
+import Agda.Utils.FileId
+  (GetIdFile(..))
+import Agda.Interaction.Library
+  (getPrimitiveLibDir)
+import Agda.Interaction.Library.Base
+  (parseLibName)
 import Agda.Interaction.Options
   (CommandLineOptions(..), defaultOptions)
 import Agda.Syntax.Common
   (Arg(..), Fixity'(..), ImportDirective'(..), ImportedName'(..),
-    Named(..), NotationPart(..), Ranged(..), RecordDirectives'(..), Renaming'(..),
-    RewriteEqn'(..), Using'(..), namedThing, unArg)
+    Named(..), NotationPart(..), Ranged(..), Renaming'(..),
+    RewriteEqn'(..), Using'(..), namedThing, unArg, whThing)
 import qualified Agda.Syntax.Common
   as Common
 import Agda.Syntax.Concrete
@@ -58,12 +66,15 @@ import Agda.Syntax.Concrete
     FieldAssignment, FieldAssignment'(..), ImportDirective, ImportedName,
     LamBinding, LamBinding'(..), LamClause(..), LHS(..), Module(..),
     ModuleApplication(..), ModuleAssignment(..), OpenShortHand(..), Pattern(..),
-    RecordAssignment, RecordDirectives, Renaming, RewriteEqn, RHS, RHS'(..),
-    TypedBinding, TypedBinding'(..), WhereClause, WhereClause'(..), _exprFieldA)
+    RecordAssignment, RecordDirective(..), Renaming, RewriteEqn, RHS, RHS'(..),
+    TypedBinding, TypedBinding'(..), WhereClause, WhereClause'(..), WhereClause_(..),
+    _exprFieldA)
 import qualified Agda.Syntax.Concrete
   as Concrete
 import Agda.Syntax.Concrete.Definitions
   (Clause(..), NiceConstructor, NiceDeclaration(..), niceDeclarations, runNice)
+import Agda.Syntax.Concrete.Definitions.Monad
+  (NiceEnv(..))
 import Agda.Syntax.Concrete.Fixity
   (DoWarn(..), Fixities, fixitiesAndPolarities)
 import Agda.Syntax.Concrete.Name
@@ -86,8 +97,6 @@ import Agda.Utils.FileName
   (filePath, mkAbsolute)
 import qualified Agda.Utils.List2
   as List2
-import Agda.Utils.List2
-  (List2(..))
 import Control.Monad
   (foldM, unless, void, when)
 import Control.Monad.Except
@@ -109,7 +118,7 @@ import Data.List.NonEmpty
 import qualified Data.Map.Strict
   as Map
 import Data.Maybe
-  (catMaybes)
+  (catMaybes, listToMaybe, mapMaybe)
 import Data.Set
   (Set)
 import qualified Data.Set
@@ -420,7 +429,7 @@ checkBinder
   -> AccessContext
   -> Binder
   -> m AccessContext
-checkBinder b c (Binder p (BName n _ _ _))
+checkBinder b c (Binder p _ (BName n _ _ _))
   = bool localSkip id b (checkName' False mempty Public RangeVariable n)
   >>= \c' -> checkPatternMay c p
   >>= \c'' -> pure (c' <> c'')
@@ -549,7 +558,7 @@ checkPatternRec
   -> AccessContext
   -> Pattern
   -> m AccessContext
-checkPatternRec r c (IdentP n)
+checkPatternRec r c (IdentP _ n)
   = maybe (pure mempty) (uncurry (checkIdentP r c)) (fromQNameRange n)
 checkPatternRec _ _ (QuoteP _)
   = pure mempty
@@ -573,14 +582,14 @@ checkPatternRec _ _ (AbsurdP _)
 checkPatternRec r c (AsP _ n p)
   = (<>) <$> maybe (pure mempty) (uncurry (checkAsP r)) (fromNameRange n)
     <*> checkPatternRec r c p
-checkPatternRec _ c (DotP _ e)
+checkPatternRec _ c (DotP _ _ e)
   = checkExpr c e >> pure mempty
 checkPatternRec _ _ (LitP _ _)
   = pure mempty
-checkPatternRec _ c (RecP _ as)
+checkPatternRec _ c (RecP _ _ as)
   = checkSequence checkPattern c (_exprFieldA <$> as)
 checkPatternRec _ c (EqualP _ es)
-  = checkExprPairs c es >> pure mempty
+  = checkExprPairs c (NonEmpty.toList es) >> pure mempty
 checkPatternRec _ _ (EllipsisP _ _)
   = pure mempty
 checkPatternRec r c (WithP _ p)
@@ -696,7 +705,7 @@ patternDelete ns
 patternName
   :: Pattern
   -> Maybe String
-patternName (IdentP (N.QName (N.Name _ _ (Id n :| []))))
+patternName (IdentP _ (N.QName (N.Name _ _ (Id n :| []))))
   = Just n
 patternName _
   = Nothing
@@ -719,6 +728,12 @@ checkExpr
   -> m ()
 checkExpr c (Ident n)
   = touchQName' c n
+checkExpr c (KnownIdent _ n)
+  = touchQName' c n
+-- Produced by operator resolution during scope checking; unreachable
+-- since we only parse (the parser produces RawApp instead).
+checkExpr _ (KnownOpApp _ r _ _ _)
+  = throwError (ErrorInternal (ErrorUnexpected UnexpectedOpApp r))
 checkExpr _ (Lit _ _)
   = pure ()
 checkExpr _ (QuestionMark _ _)
@@ -732,7 +747,7 @@ checkExpr c (App _ e (Arg _ (Named _ e')))
 checkExpr _ (OpApp r _ _ _)
   = throwError (ErrorInternal (ErrorUnexpected UnexpectedOpApp r))
 checkExpr c (WithApp _ e es)
-  = checkExpr c e >> checkExprs c es
+  = checkExpr c e >> checkExprs c (NonEmpty.toList es)
 checkExpr c (HiddenArg _ (Named _ e))
   = checkExpr c e
 checkExpr c (InstanceArg _ (Named _ e))
@@ -747,9 +762,9 @@ checkExpr c (Fun _ (Arg _ e) e')
   = checkExpr c e >> checkExpr c e'
 checkExpr c (Pi bs e)
   = checkTypedBindings1 True c bs >>= \c' -> checkExpr (c <> c') e
-checkExpr c (Rec _ rs)
+checkExpr c (Rec _ _ rs)
   = checkRecordAssignments c rs
-checkExpr c (RecUpdate _ e fs)
+checkExpr c (RecUpdate _ _ e fs)
   = checkExpr c e >> checkFieldAssignments c fs
 checkExpr c (Let _ ds e)
   = checkDeclarationsLet1 c ds >>= \c' -> traverse_ (checkExpr (c <> c')) e
@@ -1031,7 +1046,7 @@ checkWhereClause _ NoWhere
 checkWhereClause c (AnyWhere _ ds)
   = checkDeclarations c ds
   >>= \c' -> pure (mempty, c')
-checkWhereClause c (SomeWhere _ n a ds)
+checkWhereClause c (SomeWhere _ _ n a ds)
   = checkDeclarations c ds
   >>= \c' -> checkModuleNameMay (toContext c') (fromAccess a) (getRange n)
     (fromName n)
@@ -1049,6 +1064,8 @@ checkRewriteEqn c (Rewrite rs)
   = checkExprs1 c (snd <$> rs) >> pure mempty
 checkRewriteEqn c (Invert _ ws)
   = checkIrrefutableWiths c (namedThing <$> ws)
+checkRewriteEqn _ (LeftLet pes)
+  = throwError (ErrorUnsupported UnsupportedLeftLet (getRange pes))
 
 checkRewriteEqns
   :: MonadError Error m
@@ -1234,8 +1251,8 @@ checkDeclarationsWith
 checkDeclarationsWith f c ds = do
   (fixities, _)
     <- fixitiesAndPolarities NoWarn ds
-  (niceDeclsEither, _) 
-    <- pure (runNice (niceDeclarations fixities ds))
+  (niceDeclsEither, _)
+    <- pure (runNice (NiceEnv False NoWhere_) (niceDeclarations fixities ds))
   niceDecls
     <- liftEither (mapLeft ErrorDeclaration niceDeclsEither)
   f fixities c niceDecls
@@ -1288,17 +1305,17 @@ checkNiceDeclaration' _ _ (NiceField r _ _ _ _ _ _)
   = throwError (ErrorInternal (ErrorUnexpected UnexpectedField r))
 checkNiceDeclaration' fs c (PrimitiveFunction _ a _ n (Arg _ e))
   = checkExpr c e >> checkName' False fs (fromAccess a) RangeDefinition n
-checkNiceDeclaration' _ c (NiceModule r a _ (N.QName n) bs ds)
+checkNiceDeclaration' _ c (NiceModule r a _ _ (N.QName n) bs ds)
   = checkNiceModule c (fromAccess a) r (fromName n) bs ds
-checkNiceDeclaration' _ _ (NiceModule _ _ _ n@(N.Qual _ _) _ _)
+checkNiceDeclaration' _ _ (NiceModule _ _ _ _ n@(N.Qual _ _) _ _)
   = throwError (ErrorInternal (ErrorName (getRange n)))
-checkNiceDeclaration' _ c (NiceModuleMacro r a n m o i)
+checkNiceDeclaration' _ c (NiceModuleMacro r a _ n m o i)
   = checkNiceModuleMacro c (fromAccess a) r n m o i
 checkNiceDeclaration' _ _ (NicePragma _ _)
   = pure mempty
-checkNiceDeclaration' fs c (NiceRecSig _ a _ _ _ n bs e)
+checkNiceDeclaration' fs c (NiceRecSig _ _ a _ _ _ n bs e)
   = checkNiceSig fs c a RangeRecord n bs e
-checkNiceDeclaration' fs c (NiceDataSig _ a _ _ _ n bs e)
+checkNiceDeclaration' fs c (NiceDataSig _ _ a _ _ _ n bs e)
   = checkNiceSig fs c a RangeData n bs e
 checkNiceDeclaration' _ _ (NiceFunClause r _ _ _ _ _ _)
   = throwError (ErrorInternal (ErrorUnexpected UnexpectedNiceFunClause r))
@@ -1309,7 +1326,7 @@ checkNiceDeclaration' _ c (FunDef _ _ _ _ _ _ _ cs)
 checkNiceDeclaration' fs c (NiceDataDef _ _ _ _ _ n bs cs)
   = checkNiceDataDef True fs c n bs cs
 checkNiceDeclaration' _ _ (NiceLoneConstructor r _)
-  = throwError (ErrorUnsupported UnsupportedLoneConstructor r)
+  = throwError (ErrorUnsupported UnsupportedLoneConstructor (getRange r))
 checkNiceDeclaration' fs c (NiceRecDef _ _ _ _ _ n rs bs ds)
   = checkNiceRecordDef True fs c n rs bs ds
 checkNiceDeclaration' _ c (NiceGeneralize _ _ _ _ _ e)
@@ -1320,17 +1337,19 @@ checkNiceDeclaration' _ _ (NiceUnquoteDef r _ _ _ _ _ _)
   = throwError (ErrorUnsupported UnsupportedUnquote r)
 checkNiceDeclaration' _ _ (NiceUnquoteData r _ _ _ _ _ _ _)
   = throwError (ErrorUnsupported UnsupportedUnquote r)
+checkNiceDeclaration' fs c (NiceOpaque _ _ ds)
+  = checkNiceDeclarations fs c ds
 
 checkNiceDeclaration' fs c
   (NiceMutual _ _ _ _
-    (d@(NiceRecSig _ _ _ _ _ n _ _) : NiceRecDef _ _ _ _ _ n' rs bs ds : []))
+    (d@(NiceRecSig _ _ _ _ _ _ n _ _) : NiceRecDef _ _ _ _ _ n' rs bs ds : []))
   | nameRange n == nameRange n'
   = checkNiceDeclaration fs c d
   >>= \c' -> checkNiceRecordDef False fs (c <> c') n' rs bs ds
   >>= \c'' -> pure (c' <> c'')
 checkNiceDeclaration' fs c
   (NiceMutual _ _ _ _
-    (d@(NiceDataSig _ _ _ _ _ n _ _) : NiceDataDef _ _ _ _ _ n' bs cs : []))
+    (d@(NiceDataSig _ _ _ _ _ _ n _ _) : NiceDataDef _ _ _ _ _ n' bs cs : []))
   | nameRange n == nameRange n'
   = checkNiceDeclaration fs c d
   >>= \c' -> checkNiceDataDef False fs (c <> c') n' bs cs
@@ -1339,10 +1358,11 @@ checkNiceDeclaration' fs c
   (NiceMutual _ _ _ _
     ds@(FunSig _ _ _ _ _ _ _ _ _ _ : FunDef _ _ _ _ _ _ _ _ : []))
   = checkNiceDeclarations fs c ds
-checkNiceDeclaration' fs c (NiceMutual r _ _ _ ds)
+checkNiceDeclaration' fs c d@(NiceMutual _ _ _ _ ds)
   = checkNiceDeclarations fs c ds
   >>= \c' -> modifyInsert r RangeMutual
   >> accessContextInsertRangeAll r c'
+  where r = getRange d
 
 checkNiceDeclaration' _ c (NiceOpen r n i)
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
@@ -1375,7 +1395,7 @@ checkNiceDeclaration' _ _ (NiceImport r n (Just a) DoOpen i)
   >>= \c''' -> pure (c''' <> fromContext (importDirectiveAccess i) c'')
 
 checkNiceDeclaration' fs c (NicePatternSyn _ a n ns p)
-  = localSkip (checkNames' False Public RangeVariable (unArg <$> ns))
+  = localSkip (checkNames' False Public RangeVariable (whThing <$> ns))
   >>= \c' -> checkPattern (c <> c') p
   >> checkName' True fs (fromAccess a) RangePatternSynonym n
 
@@ -1397,9 +1417,9 @@ checkNiceDeclarationRecord _ rs fs c d@(PrimitiveFunction _ _ _ _ _)
   = modifyDelete rs >> checkNiceDeclaration fs c d
 checkNiceDeclarationRecord n rs fs c (NiceMutual _ _ _ _ ds)
   = checkNiceDeclarationsRecord n rs fs c ds
-checkNiceDeclarationRecord _ rs fs c d@(NiceModule _ _ _ _ _ _)
+checkNiceDeclarationRecord _ rs fs c d@(NiceModule _ _ _ _ _ _ _)
   = modifyDelete rs >> checkNiceDeclaration fs c d
-checkNiceDeclarationRecord _ _ fs c d@(NiceModuleMacro _ _ _ _ _ _)
+checkNiceDeclarationRecord _ _ fs c d@(NiceModuleMacro _ _ _ _ _ _ _)
   = checkNiceDeclaration fs c d
 checkNiceDeclarationRecord _ _ fs c d@(NiceOpen _ _ _)
   = checkNiceDeclaration fs c d
@@ -1407,9 +1427,9 @@ checkNiceDeclarationRecord _ _ fs c d@(NiceImport _ _ _ _ _)
   = checkNiceDeclaration fs c d
 checkNiceDeclarationRecord _ _ fs c d@(NicePragma _ _)
   = checkNiceDeclaration fs c d
-checkNiceDeclarationRecord _ rs fs c d@(NiceRecSig _ _ _ _ _ _ _ _)
+checkNiceDeclarationRecord _ rs fs c d@(NiceRecSig _ _ _ _ _ _ _ _ _)
   = modifyDelete rs >> checkNiceDeclaration fs c d
-checkNiceDeclarationRecord _ rs fs c d@(NiceDataSig _ _ _ _ _ _ _ _)
+checkNiceDeclarationRecord _ rs fs c d@(NiceDataSig _ _ _ _ _ _ _ _ _)
   = modifyDelete rs >> checkNiceDeclaration fs c d
 checkNiceDeclarationRecord _ _ fs c d@(NiceFunClause _ _ _ _ _ _ _)
   = checkNiceDeclaration fs c d
@@ -1420,7 +1440,9 @@ checkNiceDeclarationRecord _ _ fs c d@(FunDef _ _ _ _ _ _ _ _)
 checkNiceDeclarationRecord _ _ fs c d@(NiceDataDef _ _ _ _ _ _ _ _)
   = checkNiceDeclaration fs c d
 checkNiceDeclarationRecord _ _ _ _ (NiceLoneConstructor r _)
-  = throwError (ErrorUnsupported UnsupportedLoneConstructor r)
+  = throwError (ErrorUnsupported UnsupportedLoneConstructor (getRange r))
+checkNiceDeclarationRecord _ _ fs c (NiceOpaque _ _ ds)
+  = checkNiceDeclarations fs c ds
 checkNiceDeclarationRecord _ _ fs c d@(NiceRecDef _ _ _ _ _ _ _ _ _)
   = checkNiceDeclaration fs c d
 checkNiceDeclarationRecord _ _ fs c d@(NicePatternSyn _ _ _ _ _)
@@ -1459,7 +1481,7 @@ checkNiceDeclarationLet fs c
   >>= \c' -> checkRHS (c <> c') r
   >> checkName' False fs Public RangeDefinition n
 checkNiceDeclarationLet fs c
-  d@(NiceModuleMacro _ _ _ _ _ _)
+  d@(NiceModuleMacro _ _ _ _ _ _ _)
   = checkNiceDeclaration fs c d
 checkNiceDeclarationLet _ c
   (NiceFunClause _ _ _ _ _ _
@@ -1519,7 +1541,7 @@ checkNiceDeclarationsTop
   -> m AccessContext
 checkNiceDeclarationsTop _ _ []
   = pure mempty
-checkNiceDeclarationsTop _ c (NiceModule r a _ _ bs ds : _)
+checkNiceDeclarationsTop _ c (NiceModule r a _ _ _ bs ds : _)
   = checkNiceModule c (fromAccess a) r Nothing bs ds
 checkNiceDeclarationsTop fs c (d : ds)
   = checkNiceDeclaration fs c d
@@ -1573,15 +1595,16 @@ checkNiceRecordDef
   -> Fixities
   -> AccessContext
   -> N.Name
-  -> RecordDirectives
+  -> [RecordDirective]
   -> [LamBinding]
   -> [Declaration]
   -> m AccessContext
-checkNiceRecordDef b fs c n (RecordDirectives _ _ _ m) bs ds
+checkNiceRecordDef b fs c n directives bs ds
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromName n)
   >>= \n' -> pure (either (const mempty) id (accessContextLookup (QName n') c))
   >>= \rs' -> checkLamBindings b c bs
-  >>= \c' -> checkNiceConstructorRecordMay fs rs' (m >>= fromNameRange . fst)
+  >>= \c' -> checkNiceConstructorRecordMay fs rs'
+        (listToMaybe (mapMaybe (\d -> case d of Constructor cn _ -> fromNameRange cn; _ -> Nothing) directives))
   >>= \c'' -> checkDeclarationsRecord n' rs' (c <> c') ds
   >>= \c''' -> pure (accessContextModule' n' Public rs' (c'' <> c''') <> c'')
 
@@ -1678,8 +1701,8 @@ checkNiceModuleMacro
   -> OpenShortHand
   -> ImportDirective
   -> m AccessContext
-checkNiceModuleMacro c a _ a' (SectionApp r bs e) o i
-  = checkSectionApp c a r a' bs (parseSectionApp e) o i
+checkNiceModuleMacro c a _ a' (SectionApp r bs n es) o i
+  = checkSectionApp c a r a' bs n es o i
 checkNiceModuleMacro _ _ r _ (RecordModuleInstance _ _) _ _
   = throwError (ErrorUnsupported UnsupportedMacro r)
 
@@ -1693,20 +1716,19 @@ checkSectionApp
   -> Range
   -> N.Name
   -> [TypedBinding]
-  -> Maybe (N.QName, [Expr])
+  -> N.QName
+  -> [Expr]
   -> OpenShortHand
   -> ImportDirective
   -> m AccessContext
-checkSectionApp _ _ r _ _ Nothing _ _
-  = throwError (ErrorInternal (ErrorMacro r))
-checkSectionApp c _ r (N.NoName _ _) [] (Just (n, es)) DoOpen i
+checkSectionApp c _ r (N.NoName _ _) [] n es DoOpen i
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
   >>= \n' -> liftLookup r n' (accessContextLookupModule n' c)
   >>= \(C.Module rs c') -> modifyDelete rs
   >> checkExprs c es
   >> checkImportDirective Open r n' c' i
   >>= pure . fromContext (importDirectiveAccess i)
-checkSectionApp c a r a' bs (Just (n, es)) DontOpen i
+checkSectionApp c a r a' bs n es DontOpen i
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
   >>= \n' -> liftMaybe (ErrorInternal (ErrorName (getRange a'))) (fromName a')
   >>= \a'' -> liftLookup r n' (accessContextLookupModule n' c)
@@ -1715,7 +1737,7 @@ checkSectionApp c a r a' bs (Just (n, es)) DontOpen i
   >>= \c'' -> checkExprs (c <> c'') es
   >> checkImportDirective Module r (QName a'') c' i
   >>= \c''' -> checkModuleName c''' a r a''
-checkSectionApp c a r a' bs (Just (n, es)) DoOpen i
+checkSectionApp c a r a' bs n es DoOpen i
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
   >>= \n' -> liftMaybe (ErrorInternal (ErrorName (getRange a'))) (fromName a')
   >>= \a'' -> liftLookup r n' (accessContextLookupModule n' c)
@@ -1725,16 +1747,6 @@ checkSectionApp c a r a' bs (Just (n, es)) DoOpen i
   >> checkImportDirective Module r (QName a'') c' i
   >>= \c''' -> checkModuleName c''' a r a''
   >>= \c'''' -> pure (c'''' <> fromContext (importDirectiveAccess i) c''')
-
-parseSectionApp
-  :: Expr
-  -> Maybe (N.QName, [Expr])
-parseSectionApp (Ident n)
-  = Just (n, [])
-parseSectionApp (RawApp _ (List2 (Ident n) e es))
-  = Just (n, (e : es))
-parseSectionApp _
-  = Nothing
 
 -- ## Imports
 
@@ -2021,13 +2033,14 @@ checkFileExternal r n = do
   moduleName
     <- topLevelModuleName rawModuleName
   (pathEither, sources')
-    <- liftIO (findFile'' includes moduleName sources)
+    <- liftIO (runStateT (findFile'' includes moduleName) sources)
   path
     <- liftEither (mapLeft (ErrorFind r n) pathEither)
   _
     <- modifySources sources'
   context
-    <- localSkip (checkFilePath n (filePath (srcFilePath path)))
+    <- localSkip (checkFilePath n
+         (filePath (getIdFile (fileDictBuilder (fileDict sources')) (srcFileId path))))
   pure context
 
 checkFilePath
@@ -2051,8 +2064,9 @@ checkFileTop
   -- ^ The file to check.
   -> m (FilePath, State)
   -- ^ The project root, along with the final state.
-checkFileTop m opts p
-  = runStateT (checkFileTop' m opts p) stateEmpty
+checkFileTop m opts p = do
+  primLibDir <- liftIO getPrimitiveLibDir
+  runStateT (checkFileTop' m opts p) (stateEmpty primLibDir)
 
 checkFileTop'
   :: MonadError Error m
@@ -2240,7 +2254,7 @@ setOptions opts
   { optIncludePaths
     = unusedOptionsInclude opts
   , optLibraries
-    = T.unpack <$> unusedOptionsLibraries opts
+    = parseLibName . T.unpack <$> unusedOptionsLibraries opts
   , optOverrideLibrariesFile
     = unusedOptionsLibrariesFile opts
   , optDefaultLibs

@@ -46,13 +46,13 @@ library
     Agda.Unused.Types.Range
     Agda.Unused.Utils
   build-depends:
-    base >= 4.13 && < 4.19,
-    Agda >= 2.6.3 && < 2.6.4,
-    containers >= 0.6.2 && < 0.7,
+    base >= 4.13 && < 5,
+    Agda >= 2.8.0 && < 2.8.1,
+    containers >= 0.6.2 && < 0.8,
     directory >= 1.3.6 && < 1.4,
-    filepath >= 1.4.2 && < 1.5,
+    filepath >= 1.4.2 && < 1.6,
     mtl >= 2.2.2 && < 2.4,
-    text >= 1.2.4 && < 2.1
+    text >= 1.2.4 && < 2.2
   default-language:
     Haskell2010
   default-extensions:
@@ -71,12 +71,12 @@ executable agda-unused
     Main.hs
   build-depends:
     agda-unused,
-    base >= 4.13 && < 4.19,
-    aeson >= 2 && < 2.3,
+    base >= 4.13 && < 5,
+    aeson >= 2 && < 2.4,
     directory >= 1.3.6 && < 1.4,
     mtl >= 2.2.2 && < 2.4,
     optparse-applicative >= 0.15.1 && < 0.19,
-    text >= 1.2.4 && < 2.1
+    text >= 1.2.4 && < 2.2
   default-language:
     Haskell2010
   default-extensions:
@@ -99,11 +99,11 @@ test-suite test
     Paths_agda_unused
   build-depends:
     agda-unused,
-    base >= 4.13 && < 4.19,
-    containers >= 0.6.2 && < 0.7,
-    filepath >= 1.4.2 && < 1.5,
+    base >= 4.13 && < 5,
+    containers >= 0.6.2 && < 0.8,
+    filepath >= 1.4.2 && < 1.6,
     hspec >= 2.7.1 && < 2.12,
-    text >= 1.2.4 && < 2.1
+    text >= 1.2.4 && < 2.2
   default-language:
     Haskell2010
   default-extensions:
@@ -111,4 +111,3 @@ test-suite test
     OverloadedStrings
   ghc-options:
     -Wall
-

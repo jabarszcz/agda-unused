@@ -25,7 +25,7 @@ import Agda.Syntax.Concrete.Definitions.Errors
   (DeclarationException(..))
 import Agda.Syntax.Position
   (Range, Range'(..), getRange)
-import Agda.Utils.Pretty
+import Agda.Syntax.Common.Pretty
   (prettyShow)
 import Data.Semigroup
   (sconcat)
@@ -170,9 +170,6 @@ printInternalError (ErrorConstructor r)
 printInternalError (ErrorLet r)
   = printMessage (printRange r)
   $ "Internal error: Invalid let statement."
-printInternalError (ErrorMacro r)
-  = printMessage (printRange r)
-  $ "Internal error: Invalid module application."
 printInternalError (ErrorModuleName n)
   = printMessage (T.pack n)
   $ "Internal error: Empty top-level module name."
@@ -218,6 +215,8 @@ printUnsupportedError UnsupportedMacro
   = "Record module instance applications"
 printUnsupportedError UnsupportedUnquote
   = "Unquoting primitives"
+printUnsupportedError UnsupportedLeftLet
+  = "Left-hand side let (using)"
 
 -- ## Unused
 

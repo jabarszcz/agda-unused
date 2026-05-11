@@ -29,6 +29,8 @@ import Agda.Utils.FileName
   (AbsolutePath)
 import Control.Monad.Reader
   (MonadReader, ask, local)
+import Data.List.NonEmpty
+  (NonEmpty)
 
 -- ## Definition
 
@@ -63,7 +65,7 @@ data Environment
     :: !FilePath
     -- ^ The project root path.
   , environmentIncludes
-    :: ![AbsolutePath]
+    :: !(NonEmpty AbsolutePath)
     -- ^ The include paths.
   } deriving Show
 
@@ -106,7 +108,7 @@ askRoot
 -- | Ask for the include paths.
 askIncludes
   :: MonadReader Environment m
-  => m [AbsolutePath]
+  => m (NonEmpty AbsolutePath)
 askIncludes
   = environmentIncludes <$> ask
 

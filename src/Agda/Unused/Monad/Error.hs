@@ -37,6 +37,8 @@ import Agda.Syntax.Position
   (Range, getRange)
 import Control.Monad.Except
   (MonadError, throwError)
+import Data.List.NonEmpty
+  (NonEmpty(..))
 
 -- ## Definitions
 
@@ -133,11 +135,6 @@ data InternalError where
     :: !Range
     -> InternalError
 
-  -- | Unexpected arguments to SectionApp constructor.
-  ErrorMacro
-    :: !Range
-    -> InternalError
-
   -- | Unexpected empty top level module name.
   ErrorModuleName
     :: !FilePath
@@ -209,19 +206,21 @@ data UnsupportedError where
   UnsupportedUnquote
     :: UnsupportedError
 
+  -- | Left-hand side let (using p <- e).
+  UnsupportedLeftLet
+    :: UnsupportedError
+
   deriving Show
 
 -- ## Fixity
 
 instance (Monad m, MonadError Error m) => MonadFixityError m where
-  throwMultipleFixityDecls []
-    = throwError (ErrorFixity Nothing)
-  throwMultipleFixityDecls ((n, _) : _)
+  throwMultipleFixityDecls ((n, _) :| _)
     = throwError (ErrorFixity (Just (getRange n)))
-  throwMultiplePolarityPragmas []
-    = throwError (ErrorPolarity Nothing)
-  throwMultiplePolarityPragmas (n : _)
+  throwMultiplePolarityPragmas (n :| _)
     = throwError (ErrorPolarity (Just (getRange n)))
+  warnEmptyPolarityPragma _
+    = pure ()
   warnUnknownNamesInFixityDecl _
     = pure ()
   warnUnknownNamesInPolarityPragmas _

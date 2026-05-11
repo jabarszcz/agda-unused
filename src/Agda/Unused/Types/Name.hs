@@ -180,7 +180,7 @@ fromAsName (AsName (Right n) _)
 fromModuleName
   :: RawTopLevelModuleName
   -> QName
-fromModuleName (RawTopLevelModuleName _ (n :| ns))
+fromModuleName (RawTopLevelModuleName _ (n :| ns) _)
   = fromTexts n ns
 
 fromTexts
