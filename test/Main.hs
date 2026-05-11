@@ -288,6 +288,10 @@ data Test where
     :: !DeclarationTest
     -> Test
 
+  Integration
+    :: !IntegrationTest
+    -> Test
+
   deriving Show
 
 data PatternTest where
@@ -416,6 +420,16 @@ data DeclarationTest where
 
   deriving Show
 
+data IntegrationTest where
+
+  SuppressImport
+    :: IntegrationTest
+
+  SuppressDefinition
+    :: IntegrationTest
+
+  deriving Show
+
 testDir
   :: Test
   -> FilePath
@@ -424,6 +438,8 @@ testDir (Pattern _)
 testDir (Expression _)
   = "expression"
 testDir (Declaration _)
+  = "declaration"
+testDir (Integration _)
   = "declaration"
 
 testRootPath
@@ -517,6 +533,10 @@ testFileName (Declaration SubModuleOpen)
   = "SubModuleOpen"
 testFileName (Declaration Instance')
   = "Instance"
+testFileName (Integration SuppressImport)
+  = "SuppressImport"
+testFileName (Integration SuppressDefinition)
+  = "SuppressDefinition"
 
 testResult
   :: Test
@@ -878,6 +898,26 @@ testResult t
       ~: Definition
     ]
 
+  Integration SuppressImport ->
+    [ private (name "g")
+      ~: Postulate
+    , private (name "A")
+      ~: ImportItem
+    , public (name "g")
+      ~: Definition
+    , public (name "f")
+      ~: Definition
+    , public (name "h")
+      ~: Definition
+    ]
+
+  Integration SuppressDefinition ->
+    [ private (name "refl")
+      ~: ImportItem
+    , private (name "+0'")
+      ~: Postulate
+    ]
+
 -- ## Main
 
 main
@@ -893,6 +933,7 @@ testAll
   >> testExpression
   >> testDeclaration
   >> testExample
+  >> testIntegration
 
 testPattern
   :: Spec
@@ -986,3 +1027,10 @@ testExample
   = describe "example"
   $ it "outputs the text in README.md"
   $ testCheckExample
+
+testIntegration :: Spec
+testIntegration = describe "integration"
+  $ it "checks suppression comments on imports (SuppressImport)"
+    (testCheck (Integration SuppressImport))
+  >> it "checks suppression comments on definitions (SuppressDefinition)"
+    (testCheck (Integration SuppressDefinition))

@@ -16,11 +16,13 @@ import Agda.Unused.Monad.Error
     liftLookup)
 import Agda.Unused.Monad.Reader
   (Environment(..), Mode(..), askGlobalMain, askIncludes, askLocal, askRoot,
-    askSkip, localGlobal, localSkip)
+    askSkip, localGlobal, localSkip, localSuppressions)
 import Agda.Unused.Monad.State
   (ModuleState(..), State, getHash, getModule, getSources, modifyBlock,
     modifyCheck, modifyDelete, modifyInsert, modifySources, stateEmpty,
     stateItems, stateModules)
+import Agda.Unused.Suppress
+  (SuppressionMap, extractSuppressions)
 import Agda.Unused.Types.Access
   (Access(..), fromAccess)
 import Agda.Unused.Types.Context
@@ -83,7 +85,7 @@ import Agda.Syntax.Concrete.Name
 import qualified Agda.Syntax.Concrete.Name
   as N
 import Agda.Syntax.Parser
-  (moduleParser, parseFile, runPMIO)
+  (moduleParser, parseFile, runPMIO, tokensParser)
 import Agda.Syntax.Position
   (Range, Range'(..), RangeFile(..), getRange)
 import Agda.Syntax.TopLevelModuleName
@@ -2089,9 +2091,9 @@ checkFilePath
   => QName
   -> FilePath
   -> m Context
-checkFilePath n p
-  = readModule p
-  >>= checkModule n
+checkFilePath n p = do
+  (module', sm) <- readModule p
+  localSuppressions sm (checkModule n module')
 
 checkFileTop
   :: MonadError Error m
@@ -2117,7 +2119,7 @@ checkFileTop'
   -> m FilePath
   -- ^ The project root.
 checkFileTop' m opts p = do
-  module'
+  (module', sm)
     <- readModule p
   rawModuleName
     <- pure (rawTopLevelModuleNameForModule module')
@@ -2134,7 +2136,7 @@ checkFileTop' m opts p = do
   includes
     <- liftEither (mapLeft (ErrorInclude . showTCErr) includesEither)
   env
-    <- pure (Environment m rootPath includes)
+    <- pure (Environment m rootPath includes sm)
   _
     <- runReaderT (checkModule moduleQName module') env
   pure rootPath
@@ -2143,7 +2145,7 @@ readModule
   :: MonadError Error m
   => MonadIO m
   => FilePath
-  -> m Module
+  -> m (Module, SuppressionMap)
 readModule p = do
   exists
     <- liftIO (doesFileExist p)
@@ -2157,7 +2159,12 @@ readModule p = do
     <- liftIO (runPMIO (parseFile moduleParser rangeFile contents))
   ((module', _), _)
     <- liftEither (mapLeft ErrorParse parseResult)
-  pure module'
+  (lexResult, _)
+    <- liftIO (runPMIO (parseFile tokensParser rangeFile contents))
+  let suppressions = case lexResult of
+        Right ((tokens, _), _) -> extractSuppressions (filePath (mkAbsolute p)) tokens
+        Left _                 -> mempty
+  pure (module', suppressions)
 
 topLevelModuleName
   :: MonadState State m

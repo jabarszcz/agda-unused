@@ -17,14 +17,18 @@ module Agda.Unused.Monad.Reader
   , askGlobalMain
   , askRoot
   , askIncludes
+  , askSuppressions
 
     -- * Local
 
   , localSkip
   , localGlobal
+  , localSuppressions
 
   ) where
 
+import Agda.Unused.Suppress
+  (SuppressionMap)
 import Agda.Utils.FileName
   (AbsolutePath)
 import Control.Monad.Reader
@@ -67,7 +71,10 @@ data Environment
   , environmentIncludes
     :: !(NonEmpty AbsolutePath)
     -- ^ The include paths.
-  } deriving Show
+  , environmentSuppressions
+    :: !SuppressionMap
+    -- ^ Suppression markers for the current file.
+  }
 
 -- ## Ask
 
@@ -137,4 +144,20 @@ localGlobal
   -> m a
 localGlobal
   = localMode Global
+
+-- | Ask for the current suppression map.
+askSuppressions
+  :: MonadReader Environment m
+  => m SuppressionMap
+askSuppressions
+  = environmentSuppressions <$> ask
+
+-- | Perform a local computation with a different suppression map.
+localSuppressions
+  :: MonadReader Environment m
+  => SuppressionMap
+  -> m a
+  -> m a
+localSuppressions sm
+  = local (\e -> e {environmentSuppressions = sm})
 

@@ -182,8 +182,35 @@ Additionally, we currently do not support the following Agda features:
 `agda-unused` will produce an error if your code uses these language features.
 
 Instance declarations are always treated as used, since determining which
-instances are selected requires type-checking.
+instances are selected requires type-checking.  Imports that only provide
+instances can be suppressed with `-- agda-unused: instances` (see below).
 
 When `open import M as N` or `open module N = M` is used, qualified access
 (`N.foo`) and unqualified access (`foo`) are tracked together.  This means that
 if only qualified access is used, the redundant `open` is not reported.
+
+## Suppression Comments
+
+You can suppress specific reports with inline comments:
+
+- `-- agda-unused: ignore` — suppress all reports on the same line
+- `-- agda-unused: instances` — suppress whole-import reports on the same line
+  (useful for imports that provide instances)
+
+Examples:
+
+```agda
+-- Suppress a report for a definition used only via a REWRITE pragma,
+-- which agda-unused doesn't track:
++-assoc : ...       -- agda-unused: ignore
+{-# REWRITE +-assoc #-}
+
+-- Keep the import (it provides instances used implicitly by the type
+-- checker):
+import Data.Nat.Properties  -- agda-unused: instances
+```
+
+The `instances` marker only suppresses the whole-import report. If the import
+has a `using` list with individually unused items, those are still reported.
+This is useful since `agda-unused` does not perform type checking and cannot
+determine whether instances from an import are actually used.

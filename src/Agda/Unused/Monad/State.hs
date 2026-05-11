@@ -33,7 +33,9 @@ module Agda.Unused.Monad.State
   ) where
 
 import Agda.Unused.Monad.Reader
-  (Environment, askSkip)
+  (Environment, askSkip, askSuppressions)
+import Agda.Unused.Suppress
+  (isSuppressed)
 import Agda.Unused.Types.Context
   (Context)
 import Agda.Unused.Types.Name
@@ -235,8 +237,11 @@ modifyInsert
   => Range
   -> RangeInfo
   -> m ()
-modifyInsert r i
-  = askSkip >>= flip unless (modify (stateInsert r i))
+modifyInsert r i = do
+  skip <- askSkip
+  sm <- askSuppressions
+  unless (skip || isSuppressed sm r i) $
+    modify (stateInsert r i)
 
 -- | Mark a list of items as used.
 modifyDelete
