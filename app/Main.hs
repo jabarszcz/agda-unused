@@ -7,7 +7,12 @@ import Agda.Unused.Check
 import Agda.Unused.Monad.Error
   (Error)
 import Agda.Unused.Print
-  (printError, printNothing, printUnused, printUnusedItems)
+  (printError, printNothing, printUnused, printUnusedItems,
+    relativizeUnused, relativizeUnusedItems)
+import Config
+  (CategoryFilter(..), Config(..), allCategoryLabels, defaultConfig,
+    filterUnused, filterUnusedItems, findConfigFile, loadConfig,
+    parseCategory)
 
 import Control.Monad
   (unless)
@@ -28,103 +33,78 @@ import qualified Data.Text.IO
 import Data.Text.Lazy
   (toStrict)
 import Options.Applicative
-  (InfoMod, Parser, ParserInfo, execParser, fullDesc, header, help, helper,
-    hidden, info, long, many, metavar, optional, progDesc, short, strArgument,
-    strOption, switch)
+  (InfoMod, Parser, ParserInfo, eitherReader, execParser, flag', footer,
+    fullDesc, header, help, helper, hidden, info, long, many, metavar, option,
+    optional, progDesc, short, some, strArgument, strOption, switch, (<|>))
 import System.Directory
-  (doesDirectoryExist, doesFileExist, makeAbsolute)
+  (doesDirectoryExist, doesFileExist, getCurrentDirectory, makeAbsolute)
+import System.FilePath
+  ((</>), takeDirectory)
 import System.Exit
   (exitFailure, exitSuccess)
 import System.IO
-  (stderr)
+  (hPutStrLn, stderr)
 
 -- ## Options
 
+data ConfigMode
+  = ConfigAuto
+  | ConfigFile !FilePath
+  | ConfigNone
+  deriving Show
+
 data Options
   = Options
-  { optionsFile
-    :: !FilePath
-    -- ^ Path of the file to check.
-  , optionsGlobal
-    :: !Bool
-    -- ^ Whether to check project globally.
+  { optionsConfig
+    :: !Config
+    -- ^ Project-level settings (same type as YAML config).
   , optionsJSON
     :: !Bool
     -- ^ Whether to format output as JSON.
-  , optionsInclude
-    :: ![FilePath]
-    -- ^ Include paths.
-  , optionsLibraries
-    :: ![Text]
-    -- ^ Libraries.
-  , optionsLibrariesFile
-    :: Maybe FilePath
-    -- ^ Alternate libraries file.
-  , optionsNoLibraries
-    :: Bool
-    -- ^ Whether to not use any library files.
-  , optionsNoDefaultLibraries
-    :: Bool
-    -- ^ Whether to not use default libraries.
+  , optionsConfigMode
+    :: !ConfigMode
+    -- ^ How to find the config file.
   } deriving Show
-
--- Convert options; print error message & exit on failure.
-optionsUnused
-  :: Options
-  -> IO (FilePath, UnusedOptions)
-optionsUnused opts
-  = runExceptT (optionsUnused' opts)
-  >>= optionsUnusedEither
-
-optionsUnusedEither
-  :: Either OptionsError (FilePath, UnusedOptions)
-  -> IO (FilePath, UnusedOptions)
-optionsUnusedEither (Left e)
-  = I.hPutStrLn stderr (printOptionsError e) >> exitFailure
-optionsUnusedEither (Right opts)
-  = pure opts
-
-optionsUnused'
-  :: MonadError OptionsError m
-  => MonadIO m
-  => Options
-  -> m (FilePath, UnusedOptions)
-optionsUnused' opts = do
-  filePath
-    <- validateFile (optionsFile opts)
-  includePaths
-    <- traverse validateDirectory (optionsInclude opts)
-  libraryPath
-    <- traverse validateFile (optionsLibrariesFile opts)
-  pure
-    $ (,) filePath
-    $ UnusedOptions
-    { unusedOptionsInclude
-      = includePaths
-    , unusedOptionsLibraries
-      = optionsLibraries opts
-    , unusedOptionsLibrariesFile
-      = libraryPath
-    , unusedOptionsUseLibraries
-      = not (optionsNoLibraries opts)
-    , unusedOptionsUseDefaultLibraries
-      = not (optionsNoDefaultLibraries opts)
-    }
 
 optionsParser
   :: Parser Options
 optionsParser
   = Options
-  <$> (strArgument
-    $ metavar "FILE")
-  <*> (switch
-    $ short 'g'
-    <> long "global"
-    <> help "Check project globally")
+  <$> configParser
   <*> (switch
     $ short 'j'
     <> long "json"
     <> help "Format output as JSON")
+  <*> (ConfigFile <$> strOption
+    (long "config"
+    <> metavar "FILE"
+    <> help "Use this config file instead of auto-discovery")
+    <|> ConfigNone <$ flag' () (long "no-config"
+    <> help "Don't load any config file")
+    <|> pure ConfigAuto)
+
+configParser
+  :: Parser Config
+configParser
+  = Config
+  <$> optional (strArgument
+    $ metavar "FILE")
+  <*> (Just True <$ flag' () (short 'g' <> long "global"
+    <> help "Treat FILE as the project's complete public interface")
+    <|> Just False <$ flag' () (long "local"
+    <> help "Only report private unused code (default)")
+    <|> pure Nothing)
+  <*> (Just . Only <$> some (option categoryReader
+    $ long "only"
+    <> metavar "CATEGORY"
+    <> help "Only report these categories (repeatable)")
+    <|> Just . AllBut <$> some (option categoryReader
+    $ long "all-but"
+    <> metavar "CATEGORY"
+    <> help "Report all categories but these (repeatable)")
+    <|> Just (AllBut []) <$ flag' () (long "all"
+    <> help "Report all categories (override config filter)")
+    <|> pure Nothing)
   <*> many (strOption
     $ short 'i'
     <> long "include-path"
@@ -142,28 +122,61 @@ optionsParser
     <> metavar "FILE"
     <> help "Use FILE instead of the standard libraries file"
     <> hidden)
-  <*> (switch
-    $ long "no-libraries"
+  <*> (Just False <$ flag' () (long "no-libraries"
     <> help "Don't use any library files"
     <> hidden)
-  <*> (switch
-    $ long "no-default-libraries"
+    <|> pure Nothing)
+  <*> (Just False <$ flag' () (long "no-default-libraries"
     <> help "Don't use default libraries"
     <> hidden)
+    <|> pure Nothing)
+  where
+    categoryReader = eitherReader parseCategory
 
 optionsInfo
   :: InfoMod a
 optionsInfo
   = fullDesc
-  <> progDesc "Check for unused code in FILE"
+  <> progDesc "Check for unused code in FILE (or use 'file' from config)"
   <> header "agda-unused - check for unused code in an Agda project"
+  <> footer ("Categories: " ++ allCategoryLabels)
 
 options
   :: ParserInfo Options
 options
   = info (helper <*> optionsParser) optionsInfo
 
--- ## Validate
+-- ## Config resolution
+
+-- | Find and load the YAML config file, if any.
+-- Resolves configFile relative to the config file's directory.
+resolveConfig :: ConfigMode -> FilePath -> IO (Maybe Config)
+resolveConfig ConfigNone _
+  = pure Nothing
+resolveConfig ConfigAuto searchFrom
+  = findConfigFile searchFrom >>= loadConfigPath
+resolveConfig (ConfigFile p) _ = do
+  exists <- doesFileExist p
+  if exists
+    then loadConfigPath (Just p)
+    else hPutStrLn stderr ("Error: Config file not found: " ++ p)
+      >> exitFailure
+
+loadConfigPath :: Maybe FilePath -> IO (Maybe Config)
+loadConfigPath Nothing
+  = pure Nothing
+loadConfigPath (Just path) = do
+  result <- loadConfig path
+  case result of
+    Left err -> do
+      hPutStrLn stderr ("Error loading config: " ++ err)
+      exitFailure
+    Right cfg -> do
+      let dir = takeDirectory path
+          resolved = cfg { configFile = (dir </>) <$> configFile cfg }
+      pure (Just resolved)
+
+-- ## Merge and validate
 
 data OptionsError where
 
@@ -219,20 +232,110 @@ validateDirectory p = do
     <- liftIO (makeAbsolute p)
   pure filePath
 
+-- | Merge CLI config with YAML config, validate paths, and produce
+-- everything needed by the check functions.
+mergeValidateOpts
+  :: Config
+  -- ^ CLI config.
+  -> Maybe Config
+  -- ^ YAML config (with configFile already resolved), if any.
+  -> IO (FilePath, Bool, Maybe CategoryFilter, UnusedOptions)
+mergeValidateOpts cli mYaml
+  = runExceptT (mergeValidateOpts' cli mYaml)
+  >>= mergeValidateEither
+
+mergeValidateEither
+  :: Either OptionsError (FilePath, Bool, Maybe CategoryFilter, UnusedOptions)
+  -> IO (FilePath, Bool, Maybe CategoryFilter, UnusedOptions)
+mergeValidateEither (Left e)
+  = I.hPutStrLn stderr (printOptionsError e) >> exitFailure
+mergeValidateEither (Right result)
+  = pure result
+
+mergeValidateOpts'
+  :: MonadError OptionsError m
+  => MonadIO m
+  => Config
+  -> Maybe Config
+  -> m (FilePath, Bool, Maybe CategoryFilter, UnusedOptions)
+mergeValidateOpts' cli mYaml = do
+  let yaml = maybe defaultConfig id mYaml
+
+  -- Merge: file
+  filePath <- case configFile cli <|> configFile yaml of
+    Just f  -> validateFile f
+    Nothing -> liftIO
+      $ hPutStrLn stderr "Error: No FILE argument and no 'file' in config."
+      >> exitFailure
+
+  -- Merge: other fields
+  let globalMode
+        = maybe False id (configGlobal cli <|> configGlobal yaml)
+      filt
+        = configFilter cli <|> configFilter yaml
+      include
+        = replaceIfNonEmpty (configInclude cli) (configInclude yaml)
+      libraries
+        = replaceIfNonEmpty (configLibraries cli) (configLibraries yaml)
+      libraryFile
+        = configLibraryFile cli <|> configLibraryFile yaml
+      useLibraries
+        = maybe True id (configUseLibraries cli <|> configUseLibraries yaml)
+      useDefaultLibraries
+        = maybe True id (configUseDefaultLibraries cli <|> configUseDefaultLibraries yaml)
+
+  includePaths
+    <- traverse validateDirectory include
+  libraryPath
+    <- traverse validateFile libraryFile
+
+  pure
+    ( filePath
+    , globalMode
+    , filt
+    , UnusedOptions
+      { unusedOptionsInclude
+        = includePaths
+      , unusedOptionsLibraries
+        = libraries
+      , unusedOptionsLibrariesFile
+        = libraryPath
+      , unusedOptionsUseLibraries
+        = useLibraries
+      , unusedOptionsUseDefaultLibraries
+        = useDefaultLibraries
+      }
+    )
+
+replaceIfNonEmpty :: [a] -> [a] -> [a]
+replaceIfNonEmpty [] ys = ys
+replaceIfNonEmpty xs _  = xs
+
 -- ## Check
 
 check
   :: Options
   -> IO ()
 check opts = do
-  (filePath, opts')
-    <- optionsUnused opts
+  cwd
+    <- getCurrentDirectory
+  let searchDir = case configFile (optionsConfig opts) of
+        Just f  -> takeDirectory f
+        Nothing -> cwd
+  mYaml
+    <- resolveConfig (optionsConfigMode opts) searchDir
+  (filePath, globalMode, filt, unusedOpts)
+    <- mergeValidateOpts (optionsConfig opts) mYaml
   _
-    <- checkWith opts' filePath (optionsGlobal opts) (optionsJSON opts)
+    <- checkWith cwd filt unusedOpts filePath globalMode (optionsJSON opts)
   pure ()
 
 checkWith
-  :: UnusedOptions
+  :: FilePath
+  -- ^ Current working directory for relative paths.
+  -> Maybe CategoryFilter
+  -- ^ Category filter for results.
+  -> UnusedOptions
   -- ^ Options to use.
   -> FilePath
   -- ^ Absolute path of the file to check.
@@ -241,12 +344,14 @@ checkWith
   -> Bool
   -- ^ Whether to format output as JSON.
   -> IO ()
-checkWith opts p False j
+checkWith cwd filt opts p False json
   = checkUnused opts p
-  >>= printResult j printUnusedItems
-checkWith opts p True j
+  >>= printResult json (printUnusedItems . filterUnusedItems filt . rel)
+  where rel = if json then id else relativizeUnusedItems cwd
+checkWith cwd filt opts p True json
   = checkUnusedGlobal opts p
-  >>= printResult j printUnused
+  >>= printResult json (printUnused . filterUnused filt . rel)
+  where rel = if json then id else relativizeUnused cwd
 
 -- ## Print
 
@@ -293,4 +398,3 @@ main
 main
   = execParser options
   >>= check
-

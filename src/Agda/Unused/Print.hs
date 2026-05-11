@@ -8,6 +8,8 @@ module Agda.Unused.Print
   , printUnused
   , printUnusedItems
   , printNothing
+  , relativizeUnused
+  , relativizeUnusedItems
   ) where
 
 import Agda.Unused
@@ -24,15 +26,21 @@ import Agda.Interaction.FindFile
 import Agda.Syntax.Concrete.Definitions.Errors
   (DeclarationException(..))
 import Agda.Syntax.Position
-  (Range, Range'(..), getRange)
+  (Range, Range'(..), RangeFile(..), getRange)
 import Agda.Syntax.Common.Pretty
   (prettyShow)
+import Agda.Utils.FileName
+  (AbsolutePath(..), filePath)
+import qualified Agda.Utils.Maybe.Strict
+  as S
 import Data.Semigroup
   (sconcat)
 import Data.Text
   (Text)
 import qualified Data.Text
   as T
+import System.FilePath
+  (makeRelative, normalise)
 
 -- ## Utilities
 
@@ -47,12 +55,6 @@ parens
   -> Text
 parens t
   = "(" <> t <> ")"
-
-indent
-  :: Text
-  -> Text
-indent t
-  = "  " <> t
 
 -- ## Names
 
@@ -78,6 +80,34 @@ printQName (Qual n ns)
 
 -- ## Ranges
 
+-- | Rewrite absolute paths in a range to be relative to the given base
+-- directory. HACK: stuffs a relative path into AbsolutePath so that
+-- prettyShow prints short paths.
+relativizeRange
+  :: FilePath
+  -> Range
+  -> Range
+relativizeRange base (Range (S.Just (RangeFile p m)) is)
+  = Range (S.Just (RangeFile (AbsolutePath (T.pack (makeRelative (normalise base) (filePath p)))) m)) is
+relativizeRange _ r
+  = r
+
+-- | Make paths in unused items relative to the given base directory.
+relativizeUnusedItems
+  :: FilePath
+  -> UnusedItems
+  -> UnusedItems
+relativizeUnusedItems base (UnusedItems items)
+  = UnusedItems (map (\(r, i) -> (relativizeRange base r, i)) items)
+
+-- | Make paths in unused results relative to the given base directory.
+relativizeUnused
+  :: FilePath
+  -> Unused
+  -> Unused
+relativizeUnused base (Unused files items)
+  = Unused files (relativizeUnusedItems base items)
+
 printRange
   :: Range
   -> Text
@@ -94,13 +124,6 @@ printMessage
   -> Text
 printMessage t1 t2
   = T.intercalate "\n" [t1, t2]
-
-printMessageIndent
-  :: Text
-  -> Text
-  -> Text
-printMessageIndent t1 t2
-  = T.intercalate "\n" [t1, indent t2]
 
 -- ## Errors
 
@@ -146,8 +169,8 @@ printError (ErrorFile p)
   = printErrorFile p
 printError (ErrorFixity Nothing)
   = "Error: Multiple fixity declarations."
-printError ErrorInclude
-  = "Error: Invalid path-related options."
+printError (ErrorInclude msg)
+  = "Error: Invalid path-related options.\n" <> T.pack msg
 printError (ErrorInternal e)
   = printInternalError e
 printError (ErrorParse e)
@@ -241,7 +264,7 @@ printUnusedWith (Just t1) Nothing
   = Just t1
 printUnusedWith (Just t1) (Just t2)
   = Just (T.intercalate "\n" [t1, t2])
-    
+
 printUnusedFiles
   :: [FilePath]
   -> Maybe Text
@@ -254,7 +277,7 @@ printUnusedFile
   :: FilePath
   -> Text
 printUnusedFile p
-  = printMessageIndent (T.pack p) "unused file"
+  = T.pack p <> ": unused file"
 
 -- | Print a collection of unused items.
 printUnusedItems
@@ -276,7 +299,7 @@ printRangeInfoWith
   -> RangeInfo
   -> Text
 printRangeInfoWith r i
-  = printMessageIndent (printRange r) (printRangeInfo i)
+  = printRange r <> ": " <> printRangeInfo i
 
 printRangeInfo
   :: RangeInfo
@@ -315,4 +338,3 @@ printRangeType RangeRecordConstructor
   = "record constructor"
 printRangeType RangeVariable
   = "variable"
-

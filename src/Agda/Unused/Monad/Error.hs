@@ -86,7 +86,8 @@ data Error where
 
   -- | Error in computing include paths.
   ErrorInclude
-    :: Error
+    :: !String
+    -> Error
 
   -- | Internal error; should be reported.
   ErrorInternal

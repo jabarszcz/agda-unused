@@ -10,6 +10,12 @@ module Agda.Unused.Types.Range
     RangeType(..)
   , RangeInfo(..)
 
+    -- * Labels
+
+  , rangeTypeLabel
+  , parseRangeType
+  , allRangeTypes
+
     -- * Interface
 
   , rangePath
@@ -71,7 +77,7 @@ data RangeType where
   RangeVariable
     :: RangeType
 
-  deriving (Eq, Ord, Show)
+  deriving (Bounded, Enum, Eq, Ord, Show)
 
 -- | Information associated with an item found at a certain range.
 data RangeInfo where
@@ -85,6 +91,45 @@ data RangeInfo where
     :: RangeInfo
 
   deriving (Eq, Ord, Show)
+
+-- ## Labels
+
+-- | User-facing label for a 'RangeType'.
+rangeTypeLabel :: RangeType -> String
+rangeTypeLabel RangeData = "data"
+rangeTypeLabel RangeDefinition = "definitions"
+rangeTypeLabel RangeImport = "imports"
+rangeTypeLabel RangeImportItem = "import-items"
+rangeTypeLabel RangeModule = "modules"
+rangeTypeLabel RangeModuleItem = "module-items"
+rangeTypeLabel RangeOpen = "opens"
+rangeTypeLabel RangeOpenItem = "open-items"
+rangeTypeLabel RangePatternSynonym = "pattern-synonyms"
+rangeTypeLabel RangePostulate = "postulates"
+rangeTypeLabel RangeRecord = "records"
+rangeTypeLabel RangeRecordConstructor = "record-constructors"
+rangeTypeLabel RangeVariable = "variables"
+
+-- | Parse a label string into a 'RangeType'.
+parseRangeType :: String -> Maybe RangeType
+parseRangeType "data" = Just RangeData
+parseRangeType "definitions" = Just RangeDefinition
+parseRangeType "imports" = Just RangeImport
+parseRangeType "import-items" = Just RangeImportItem
+parseRangeType "modules" = Just RangeModule
+parseRangeType "module-items" = Just RangeModuleItem
+parseRangeType "opens" = Just RangeOpen
+parseRangeType "open-items" = Just RangeOpenItem
+parseRangeType "pattern-synonyms" = Just RangePatternSynonym
+parseRangeType "postulates" = Just RangePostulate
+parseRangeType "records" = Just RangeRecord
+parseRangeType "record-constructors" = Just RangeRecordConstructor
+parseRangeType "variables" = Just RangeVariable
+parseRangeType _ = Nothing
+
+-- | All 'RangeType' values.
+allRangeTypes :: [RangeType]
+allRangeTypes = [minBound .. maxBound]
 
 -- ## Interface
 

@@ -52,7 +52,8 @@ import Agda.Utils.FileId
 import Agda.Interaction.Library
   (getPrimitiveLibDir)
 import Agda.Interaction.Library.Base
-  (parseLibName)
+  (LibError(..), LibError'(..), LibErrors(..),
+    LibName(..), LibrariesFile(..), parseLibName)
 import Agda.Interaction.Options
   (CommandLineOptions(..), defaultOptions)
 import Agda.Syntax.Common
@@ -90,7 +91,7 @@ import Agda.Syntax.TopLevelModuleName
     rawTopLevelModuleNameForModule, rawTopLevelModuleNameForQName,
     unsafeTopLevelModuleName)
 import Agda.TypeChecking.Monad.Base
-  (TCM, runTCMTop)
+  (Closure(..), TCErr(..), TCM, TypeError(..), runTCMTop)
 import Agda.TypeChecking.Monad.Options
   (getIncludeDirs, setCommandLineOptions)
 import Agda.Utils.FileName
@@ -114,7 +115,7 @@ import Data.Foldable
 import qualified Data.List.NonEmpty
   as NonEmpty
 import Data.List.NonEmpty
-  (NonEmpty(..), nonEmpty)
+  (NonEmpty(..), nonEmpty, toList)
 import qualified Data.Map.Strict
   as Map
 import Data.Maybe
@@ -2094,7 +2095,7 @@ checkFileTop' m opts p = do
   includesEither
     <- liftIO (runTCMTop (setOptions opts >> getIncludeDirs))
   includes
-    <- liftEither (mapLeft (const ErrorInclude) includesEither)
+    <- liftEither (mapLeft (ErrorInclude . showTCErr) includesEither)
   env
     <- pure (Environment m rootPath includes)
   _
@@ -2269,4 +2270,31 @@ inFile
   -> Bool
 inFile p (r, _)
   = rangePath r == Just p
+
+showTCErr :: TCErr -> String
+showTCErr (TypeError _ _ cl)
+  = showTypeError (clValue cl)
+showTCErr (IOException _ _ e)
+  = show e
+showTCErr (GenericException s)
+  = s
+showTCErr e
+  = show e
+
+showTypeError :: TypeError -> String
+showTypeError (LibraryError errs)
+  = unlines (map showLibError (toList (libErrors errs)))
+showTypeError e
+  = show e
+
+showLibError :: LibError -> String
+showLibError (LibError _ (LibNotFound lf ln))
+  = "Library '" ++ T.unpack (libNameBase ln) ++ "' not found."
+  ++ " Libraries file: " ++ lfPath lf
+showLibError (LibError _ (LibrariesFileNotFound p))
+  = "Libraries file not found: " ++ p
+showLibError (LibError _ (AmbiguousLib ln _))
+  = "Ambiguous library '" ++ T.unpack (libNameBase ln) ++ "'."
+showLibError e
+  = show e
 

@@ -49,12 +49,9 @@ $ agda-unused Test.agda
 Output:
 
 ```
-/home/user/Test.agda:4.23-27
-  unused imported item ‘true’
-/home/user/Test.agda:5.1-30
-  unused import ‘Agda.Builtin.Unit’
-/home/user/Test.agda:11.9-10
-  unused variable ‘x’
+Test.agda:4.23-27: unused imported item ‘true’
+Test.agda:5.1-30: unused import ‘Agda.Builtin.Unit’
+Test.agda:11.9-10: unused variable ‘x’
 ```
 
 ## Usage
@@ -62,19 +59,56 @@ Output:
 ```
 agda-unused - check for unused code in an Agda project
 
-Usage: agda-unused FILE [-g|--global] [-j|--json]
-  Check for unused code in FILE
+Usage: agda-unused [FILE] [(-g|--global) | --local]
+                   [(--only CATEGORY) | (--all-but CATEGORY) | --all]
+                   [-j|--json] [--config FILE | --no-config]
+
+  Check for unused code in FILE (or use 'file' from config)
 
 Available options:
   -h,--help                Show this help text
-  -g,--global              Check project globally
-  -j,--json                Format output as JSON
+  -g,--global              Treat FILE as the project's complete public interface
+  --local                  Only report private unused code (default)
+  --only CATEGORY          Only report these categories (repeatable)
+  --all-but CATEGORY       Report all categories but these (repeatable)
+  --all                    Report all categories (override config filter)
   -i,--include-path DIR    Look for imports in DIR
   -l,--library LIB         Use library LIB
   --library-file FILE      Use FILE instead of the standard libraries file
   --no-libraries           Don't use any library files
   --no-default-libraries   Don't use default libraries
+  -j,--json                Format output as JSON
+  --config FILE            Use this config file instead of auto-discovery
+  --no-config              Don't load any config file
+
+Categories: data, definitions, imports, import-items, modules, module-items,
+opens, open-items, pattern-synonyms, postulates, records, record-constructors,
+variables, mutual
 ```
+
+## Configuration
+
+`agda-unused` looks for a `.agda-unused.yaml` configuration file starting from
+the checked file's directory and searching upward. Use `--config FILE` to
+specify one explicitly, or `--no-config` to skip config loading.
+
+Example `.agda-unused.yaml`:
+
+```yaml
+file: Everything.agda  # default file when no FILE argument
+global: true           # equivalent to --global
+all-but:               # mutually exclusive with 'only'
+  - variables
+```
+
+Agda library options can also be set in the config: `include` (list of
+include paths), `libraries` (list of library names), `library-file` (override
+`~/.agda/libraries`), `use-libraries` and `use-default-libraries` (booleans,
+both default to `true`). These are rarely needed since Agda resolves libraries
+from `.agda-lib` files automatically.
+
+CLI flags take precedence over config file settings. For list fields
+(`include`, `libraries`), CLI values replace (not append) config values.
 
 ## Global
 
@@ -87,10 +121,10 @@ check for unused files.
 To perform a global check on an Agda project, first create a file that imports
 exactly the intended public interface of your project. For example:
 
-File `All.agda`:
+File `Everything.agda`:
 
 ```
-module All where
+module Everything where
 
 import A
   using (f)
@@ -102,7 +136,7 @@ import C
 Command:
 
 ```
-$ agda-unused All.agda --global
+$ agda-unused Everything.agda --global
 ```
 
 ## JSON

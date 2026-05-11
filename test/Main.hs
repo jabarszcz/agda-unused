@@ -240,13 +240,10 @@ testUnusedExample (Right is)
 testUnusedOutput
   :: Maybe [Text]
   -> Expectation
-testUnusedOutput (Just [t0, t1, t2, t3, t4, t5])
-  = (t0 `shouldSatisfy` T.isSuffixOf "/Test.agda:4.23-27")
-  >> (t1 `shouldBe` "  unused imported item ‘true’")
-  >> (t2 `shouldSatisfy` T.isSuffixOf "/Test.agda:5.1-30")
-  >> (t3 `shouldBe` "  unused import ‘Agda.Builtin.Unit’")
-  >> (t4 `shouldSatisfy` T.isSuffixOf "/Test.agda:11.9-10")
-  >> (t5 `shouldBe` "  unused variable ‘x’")
+testUnusedOutput (Just [t0, t1, t2])
+  = (t0 `shouldSatisfy` T.isSuffixOf "Test.agda:4.23-27: unused imported item ‘true’")
+  >> (t1 `shouldSatisfy` T.isSuffixOf "Test.agda:5.1-30: unused import ‘Agda.Builtin.Unit’")
+  >> (t2 `shouldSatisfy` T.isSuffixOf "Test.agda:11.9-10: unused variable ‘x’")
 testUnusedOutput _
   = expectationFailure ""
 
@@ -857,4 +854,3 @@ testExample
   = describe "example"
   $ it "outputs the text in README.md"
   $ testCheckExample
-
