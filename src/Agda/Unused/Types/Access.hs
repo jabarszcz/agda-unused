@@ -54,7 +54,7 @@ access _ y Public
 fromAccess
   :: C.Access
   -> Access
-fromAccess (C.PrivateAccess _)
+fromAccess (C.PrivateAccess _ _)
   = Private
 fromAccess C.PublicAccess
   = Public

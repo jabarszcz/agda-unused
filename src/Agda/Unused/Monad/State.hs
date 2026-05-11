@@ -46,7 +46,13 @@ import Agda.Syntax.Common
 import Agda.Syntax.Position
   (Range, Range'(..))
 import Agda.TypeChecking.Monad.Base
-  (ModuleToSource)
+  (ModuleToSource(..), FileDictWithBuiltins(..))
+import Agda.Utils.FileId
+  (FileDictBuilder)
+import Agda.Utils.FileName
+  (AbsolutePath)
+import Agda.Utils.Null
+  (empty)
 import Control.Monad
   (unless)
 import Control.Monad.Reader
@@ -94,15 +100,18 @@ data State
   , stateHash
     :: !Word64
     -- ^ An integer to use as the next module hash.
-  } deriving Show
+  }
 
 -- ## Interface
 
--- | Construct an empty state.
+-- | Construct an empty state given the primitive library directory.
 stateEmpty
-  :: State
-stateEmpty
-  = State mempty mempty mempty 0
+  :: AbsolutePath
+  -> State
+stateEmpty primLibDir
+  = State mempty mempty
+      (ModuleToSource (FileDictWithBuiltins (empty :: FileDictBuilder) empty primLibDir) Map.empty)
+      0
 
 -- | Get a sorted list of state items.
 --
