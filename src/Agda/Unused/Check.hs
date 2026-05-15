@@ -855,19 +855,22 @@ checkRawApp c es
   = touchNames c (accessContextMatch (exprNames es) c)
   >> checkExprs c es
 
-exprName
+-- | Extract all identifier parts from an expression.
+-- This includes parts of operator names (e.g., @+_@ contributes @"+"@),
+-- which is needed for matching operator sections.
+exprNameParts
   :: Expr
-  -> Maybe String
-exprName (Ident (N.QName (N.Name _ _ (Id n :| []))))
-  = Just n
-exprName _
-  = Nothing
+  -> [String]
+exprNameParts (Ident (N.QName n))
+  = maybe [] nameIds (fromName n)
+exprNameParts _
+  = []
 
 exprNames
   :: [Expr]
   -> [String]
 exprNames
-  = catMaybes . fmap exprName
+  = concatMap exprNameParts
 
 -- ## Assignments
 
