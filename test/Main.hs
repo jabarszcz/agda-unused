@@ -399,6 +399,9 @@ data DeclarationTest where
   WhereWith
     :: DeclarationTest
 
+  LetPattern
+    :: DeclarationTest
+
   deriving Show
 
 testDir
@@ -490,6 +493,8 @@ testFileName (Declaration OperatorSection)
   = "OperatorSection"
 testFileName (Declaration WhereWith)
   = "WhereWith"
+testFileName (Declaration LetPattern)
+  = "LetPattern"
 
 testResult
   :: Test
@@ -787,6 +792,13 @@ testResult t
       ~: Definition
     ]
 
+  Declaration LetPattern ->
+    [ private (name "b")
+      ~: Variable
+    , public (name "f")
+      ~: Definition
+    ]
+
 -- ## Main
 
 main
@@ -876,6 +888,8 @@ testDeclaration
     (testCheck (Declaration OperatorSection))
   >> it "checks where-open in with-clauses (WhereWith)"
     (testCheck (Declaration WhereWith))
+  >> it "checks let-patterns in type signatures (LetPattern)"
+    (testCheck (Declaration LetPattern))
 
 testExample
   :: Spec
