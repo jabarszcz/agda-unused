@@ -943,11 +943,23 @@ checkLHS
   => AccessContext
   -> LHS
   -> m AccessContext
-checkLHS c (LHS p rs ws)
+checkLHS c (LHS p rs _)
   = checkPattern c p
   >>= \c' -> checkRewriteEqns (c <> c') rs
-  >>= \c'' -> checkExprs (c <> c' <> c'') (unArg . namedThing <$> ws)
-  >> pure (c' <> c'')
+  >>= \c'' -> pure (c' <> c'')
+
+-- | Check with-expressions from an LHS, using a context that includes
+-- the where-clause bindings (needed for @with ... where open ...@).
+checkWithExprs
+  :: MonadError Error m
+  => MonadReader Environment m
+  => MonadState State m
+  => MonadIO m
+  => AccessContext
+  -> LHS
+  -> m ()
+checkWithExprs c (LHS _ _ ws)
+  = checkExprs c (unArg . namedThing <$> ws)
 
 checkRHS
   :: MonadError Error m
@@ -962,6 +974,23 @@ checkRHS _ AbsurdRHS
 checkRHS c (RHS e)
   = checkExpr c e
 
+checkFunClause
+  :: MonadError Error m
+  => MonadReader Environment m
+  => MonadState State m
+  => MonadIO m
+  => AccessContext
+  -> LHS
+  -> RHS
+  -> WhereClause
+  -> m (AccessContext, AccessContext)
+checkFunClause c l r w
+  = checkLHS c l
+  >>= \c' -> checkWhereClause (c <> c') w
+  >>= \(m, c'') -> checkWithExprs (c <> c' <> c'') l
+  >> checkRHS (c <> c' <> c'') r
+  >> pure (c', m)
+
 checkClause
   :: MonadError Error m
   => MonadReader Environment m
@@ -972,10 +1001,8 @@ checkClause
   -> m AccessContext
 checkClause c (Clause n _ l r w cs)
   = pure (maybe id accessContextDefine (fromName n) c)
-  >>= \c' -> checkLHS c' l
-  >>= \c'' -> checkWhereClause (c' <> c'') w
-  >>= \(m, c''') -> checkRHS (c' <> c'' <> c''') r
-  >> checkClauses (c' <> c'' <> c''') cs
+  >>= \c' -> checkFunClause c' l r w
+  >>= \(c'', m) -> checkClauses (c' <> c'' <> m) cs
   >>= \m' -> pure (m <> m')
 
 checkClauses
@@ -1490,8 +1517,7 @@ checkNiceDeclarationLet fs c
 checkNiceDeclarationLet _ c
   (NiceFunClause _ _ _ _ _ _
     (Concrete.FunClause l r NoWhere _))
-  = checkRHS c r
-  >> checkLHS c l
+  = fst <$> checkFunClause c l r NoWhere
 checkNiceDeclarationLet _ _ d
   = throwError (ErrorInternal (ErrorLet (getRange d)))
 

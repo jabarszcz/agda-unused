@@ -393,6 +393,9 @@ data DeclarationTest where
   OperatorSection
     :: DeclarationTest
 
+  WhereWith
+    :: DeclarationTest
+
   deriving Show
 
 testDir
@@ -482,6 +485,8 @@ testFileName (Declaration Module')
   = "Module"
 testFileName (Declaration OperatorSection)
   = "OperatorSection"
+testFileName (Declaration WhereWith)
+  = "WhereWith"
 
 testResult
   :: Test
@@ -772,6 +777,13 @@ testResult t
       ~: Definition
     ]
 
+  Declaration WhereWith ->
+    [ public (name "swap")
+      ~: Definition
+    , public (name "g")
+      ~: Definition
+    ]
+
 -- ## Main
 
 main
@@ -859,6 +871,8 @@ testDeclaration
     (testCheck (Declaration Module'))
   >> it "checks operator sections (OperatorSection)"
     (testCheck (Declaration OperatorSection))
+  >> it "checks where-open in with-clauses (WhereWith)"
+    (testCheck (Declaration WhereWith))
 
 testExample
   :: Spec
