@@ -1094,8 +1094,8 @@ checkRewriteEqn c (Rewrite rs)
   = checkExprs1 c (snd <$> rs) >> pure mempty
 checkRewriteEqn c (Invert _ ws)
   = checkIrrefutableWiths c (namedThing <$> ws)
-checkRewriteEqn _ (LeftLet pes)
-  = throwError (ErrorUnsupported UnsupportedLeftLet (getRange pes))
+checkRewriteEqn c (LeftLet pes)
+  = checkIrrefutableWiths c pes
 
 checkRewriteEqns
   :: MonadError Error m

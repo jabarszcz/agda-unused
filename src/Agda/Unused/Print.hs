@@ -215,8 +215,6 @@ printUnsupportedError UnsupportedMacro
   = "Record module instance applications"
 printUnsupportedError UnsupportedUnquote
   = "Unquoting primitives"
-printUnsupportedError UnsupportedLeftLet
-  = "Left-hand side let (using)"
 
 -- ## Unused
 
