@@ -602,6 +602,14 @@ testResult t
       ~: Definition
     , public (name "m")
       ~: Definition
+      -- let open (NiceOpen path): p uses plain-val; q's open is unused
+      -- Without the NiceOpen fix, p and q cause "Internal error: Invalid let statement"
+    , public (name "p")
+      ~: Definition
+    , public (name "q")
+      ~: Definition
+    , private (name "Plain")
+      ~: Open
     ]
 
   Expression DoBlock1 ->

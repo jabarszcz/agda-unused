@@ -66,3 +66,15 @@ m
 m a
   = let module M = Id a in M.value
 
+module Plain where
+  plain-val : Set₁
+  plain-val = Set
+
+-- let open plain module (NiceOpen path): plain-val used
+p : Set₁
+p = let open Plain in plain-val
+
+-- let open plain module (NiceOpen path): open unused
+q : {A : Set} → A → A
+q x = let open Plain in x
+
