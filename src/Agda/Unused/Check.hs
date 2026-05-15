@@ -1517,6 +1517,9 @@ checkNiceDeclarationLet fs c
 checkNiceDeclarationLet fs c
   d@(NiceModuleMacro _ _ _ _ _ _ _)
   = checkNiceDeclaration fs c d
+checkNiceDeclarationLet fs c
+  d@(NiceOpen _ _ _)
+  = checkNiceDeclaration fs c d
 checkNiceDeclarationLet _ c
   (NiceFunClause _ _ _ _ _ _
     (Concrete.FunClause l r NoWhere _))
