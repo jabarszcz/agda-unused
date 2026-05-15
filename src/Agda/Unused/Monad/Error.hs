@@ -207,10 +207,6 @@ data UnsupportedError where
   UnsupportedUnquote
     :: UnsupportedError
 
-  -- | Left-hand side let (using p <- e).
-  UnsupportedLeftLet
-    :: UnsupportedError
-
   deriving Show
 
 -- ## Fixity
