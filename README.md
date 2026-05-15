@@ -181,6 +181,9 @@ Additionally, we currently do not support the following Agda features:
 
 `agda-unused` will produce an error if your code uses these language features.
 
+Instance declarations are always treated as used, since determining which
+instances are selected requires type-checking.
+
 When `open import M as N` or `open module N = M` is used, qualified access
 (`N.foo`) and unqualified access (`foo`) are tracked together.  This means that
 if only qualified access is used, the redundant `open` is not reported.

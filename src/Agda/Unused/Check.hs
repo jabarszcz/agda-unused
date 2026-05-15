@@ -58,7 +58,7 @@ import Agda.Interaction.Options
   (CommandLineOptions(..), defaultOptions)
 import Agda.Syntax.Common
   (Arg(..), Fixity'(..), ImportDirective'(..), ImportedName'(..),
-    Named(..), NotationPart(..), Ranged(..), Renaming'(..),
+    IsInstance(..), Named(..), NotationPart(..), Ranged(..), Renaming'(..),
     RewriteEqn'(..), Using'(..), namedThing, unArg, whThing)
 import qualified Agda.Syntax.Common
   as Common
@@ -1330,8 +1330,9 @@ checkNiceDeclaration'
   -> NiceDeclaration
   -> m AccessContext
 
-checkNiceDeclaration' fs c (Axiom _ a _ _ _ n e)
+checkNiceDeclaration' fs c (Axiom _ a _ i _ n e)
   = checkExpr c e >> checkName' False fs (fromAccess a) RangePostulate n
+  >>= \c' -> markInstance i n >> pure c'
 checkNiceDeclaration' _ _ (NiceField r _ _ _ _ _ _)
   = throwError (ErrorInternal (ErrorUnexpected UnexpectedField r))
 checkNiceDeclaration' fs c (PrimitiveFunction _ a _ n (Arg _ e))
@@ -1353,8 +1354,9 @@ checkNiceDeclaration' _ c (NiceFunClause _ _ _ _ _ _
   = fst <$> checkFunClause c l r w
 checkNiceDeclaration' _ _ (NiceFunClause r _ _ _ _ _ _)
   = throwError (ErrorInternal (ErrorUnexpected UnexpectedNiceFunClause r))
-checkNiceDeclaration' fs c (FunSig _ a _ _ _ _ _ _ n e)
+checkNiceDeclaration' fs c (FunSig _ a _ i _ _ _ _ n e)
   = checkExpr c e >> checkName' False fs (fromAccess a) RangeDefinition n
+  >>= \c' -> markInstance i n >> pure c'
 checkNiceDeclaration' _ c (FunDef _ _ _ _ _ _ _ cs)
   = checkClauses c cs >> pure mempty
 checkNiceDeclaration' fs c (NiceDataDef _ _ _ _ _ n bs cs)
@@ -2305,6 +2307,19 @@ inFile
   -> Bool
 inFile p (r, _)
   = rangePath r == Just p
+
+-- | Mark an instance declaration as used.  Determining which instances
+-- are selected requires type-checking, which agda-unused does not perform.
+markInstance
+  :: MonadReader Environment m
+  => MonadState State m
+  => IsInstance
+  -> N.Name
+  -> m ()
+markInstance (InstanceDef _) n
+  = modifyDelete (Set.singleton (nameRange n))
+markInstance NotInstanceDef _
+  = pure ()
 
 showTCErr :: TCErr -> String
 showTCErr (TypeError _ _ cl)

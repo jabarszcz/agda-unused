@@ -411,6 +411,9 @@ data DeclarationTest where
   SubModuleOpen
     :: DeclarationTest
 
+  Instance'
+    :: DeclarationTest
+
   deriving Show
 
 testDir
@@ -512,6 +515,8 @@ testFileName (Declaration QualifiedName)
   = "QualifiedName"
 testFileName (Declaration SubModuleOpen)
   = "SubModuleOpen"
+testFileName (Declaration Instance')
+  = "Instance"
 
 testResult
   :: Test
@@ -866,6 +871,13 @@ testResult t
       ~: Definition
     ]
 
+  Declaration Instance' ->
+    [ private (name "g")
+      ~: Postulate
+    , public (name "h")
+      ~: Definition
+    ]
+
 -- ## Main
 
 main
@@ -965,6 +977,8 @@ testDeclaration
     (testCheck (Declaration QualifiedName))
   >> it "checks open import with sub-module open (SubModuleOpen)"
     (testCheck (Declaration SubModuleOpen))
+  >> it "checks instance declarations (Instance)"
+    (testCheck (Declaration Instance'))
 
 testExample
   :: Spec
