@@ -1348,6 +1348,9 @@ checkNiceDeclaration' fs c (NiceRecSig _ _ a _ _ _ n bs e)
   = checkNiceSig fs c a RangeRecord n bs e
 checkNiceDeclaration' fs c (NiceDataSig _ _ a _ _ _ n bs e)
   = checkNiceSig fs c a RangeData n bs e
+checkNiceDeclaration' _ c (NiceFunClause _ _ _ _ _ _
+    (Concrete.FunClause l r w _))
+  = fst <$> checkFunClause c l r w
 checkNiceDeclaration' _ _ (NiceFunClause r _ _ _ _ _ _)
   = throwError (ErrorInternal (ErrorUnexpected UnexpectedNiceFunClause r))
 checkNiceDeclaration' fs c (FunSig _ a _ _ _ _ _ _ n e)
