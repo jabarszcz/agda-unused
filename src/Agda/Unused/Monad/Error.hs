@@ -198,10 +198,6 @@ data UnsupportedError where
   UnsupportedLoneConstructor
     :: UnsupportedError
 
-  -- | Record module instance applications.
-  UnsupportedMacro
-    :: UnsupportedError
-
   -- | Unquoting primitives.
   UnsupportedUnquote
     :: UnsupportedError

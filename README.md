@@ -142,7 +142,6 @@ drawbacks:
 
 Additionally, we currently do not support the following Agda features:
 
-- [record module instance applications](https://agda.readthedocs.io/en/v2.8.0/language/module-system.html#parameterised-modules)
 - [unquoting declarations](https://agda.readthedocs.io/en/v2.8.0/language/reflection.html#id3)
 - [lone constructors](https://agda.readthedocs.io/en/v2.8.0/language/mutual-recursion.html#interleaved-mutual-blocks)
 

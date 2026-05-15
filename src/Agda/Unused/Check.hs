@@ -1734,11 +1734,15 @@ checkNiceModuleMacro
   -> ImportDirective
   -> m AccessContext
 checkNiceModuleMacro c a _ a' (SectionApp r bs n es) o i
-  = checkSectionApp c a r a' bs n es o i
-checkNiceModuleMacro _ _ r _ (RecordModuleInstance _ _) _ _
-  = throwError (ErrorUnsupported UnsupportedMacro r)
+  = checkTypedBindings True c bs
+  >>= \c'' -> checkExprs (c <> c'') es
+  >> checkModuleApp c a r a' n o i
+checkNiceModuleMacro c a _ a' (RecordModuleInstance r n) o i
+  = checkModuleApp c a r a' n o i
 
-checkSectionApp
+-- | Look up a module by name, mark it used, check the import directive,
+-- optionally register the module name, and optionally open it.
+checkModuleApp
   :: MonadError Error m
   => MonadReader Environment m
   => MonadState State m
@@ -1747,38 +1751,23 @@ checkSectionApp
   -> Access
   -> Range
   -> N.Name
-  -> [TypedBinding]
   -> N.QName
-  -> [Expr]
   -> OpenShortHand
   -> ImportDirective
   -> m AccessContext
-checkSectionApp c _ r (N.NoName _ _) [] n es DoOpen i
+checkModuleApp c a r a' n o i
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
   >>= \n' -> liftLookup r n' (accessContextLookupModule n' c)
   >>= \(C.Module rs c') -> modifyDelete rs
-  >> checkExprs c es
-  >> checkImportDirective Open r n' c' i
-  >>= pure . fromContext (importDirectiveAccess i)
-checkSectionApp c a r a' bs n es DontOpen i
-  = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
-  >>= \n' -> liftMaybe (ErrorInternal (ErrorName (getRange a'))) (fromName a')
-  >>= \a'' -> liftLookup r n' (accessContextLookupModule n' c)
-  >>= \(C.Module rs c') -> modifyDelete rs
-  >> checkTypedBindings True c bs
-  >>= \c'' -> checkExprs (c <> c'') es
-  >> checkImportDirective Module r (QName a'') c' i
-  >>= \c''' -> checkModuleName c''' a r a''
-checkSectionApp c a r a' bs n es DoOpen i
-  = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
-  >>= \n' -> liftMaybe (ErrorInternal (ErrorName (getRange a'))) (fromName a')
-  >>= \a'' -> liftLookup r n' (accessContextLookupModule n' c)
-  >>= \(C.Module rs c') -> modifyDelete rs
-  >> checkTypedBindings True c bs
-  >>= \c'' -> checkExprs (c <> c'') es
-  >> checkImportDirective Module r (QName a'') c' i
-  >>= \c''' -> checkModuleName c''' a r a''
-  >>= \c'''' -> pure (c'''' <> fromContext (importDirectiveAccess i) c''')
+  >> case a' of
+    N.NoName _ _ -> checkImportDirective Open r n' c' i
+      >>= pure . fromContext (importDirectiveAccess i)
+    _ -> liftMaybe (ErrorInternal (ErrorName (getRange a'))) (fromName a')
+      >>= \a'' -> checkImportDirective Module r (QName a'') c' i
+      >>= \c''' -> checkModuleName c''' a r a''
+      >>= \c'''' -> case o of
+        DontOpen -> pure c''''
+        DoOpen -> pure (c'''' <> fromContext (importDirectiveAccess i) c''')
 
 -- ## Imports
 
