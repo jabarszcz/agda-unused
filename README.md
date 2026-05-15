@@ -147,3 +147,5 @@ Additionally, we currently do not support the following Agda features:
 
 `agda-unused` will produce an error if your code uses these language features.
 
+Instance declarations are always treated as used, since determining which
+instances are selected requires type-checking.

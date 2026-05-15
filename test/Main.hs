@@ -408,6 +408,9 @@ data DeclarationTest where
   RecordInstance
     :: DeclarationTest
 
+  Instance'
+    :: DeclarationTest
+
   deriving Show
 
 testDir
@@ -505,6 +508,8 @@ testFileName (Declaration LetPattern)
   = "LetPattern"
 testFileName (Declaration RecordInstance)
   = "RecordInstance"
+testFileName (Declaration Instance')
+  = "Instance"
 
 testResult
   :: Test
@@ -846,6 +851,13 @@ testResult t
       ~: Postulate
     ]
 
+  Declaration Instance' ->
+    [ private (name "g")
+      ~: Postulate
+    , public (name "h")
+      ~: Definition
+    ]
+
 -- ## Main
 
 main
@@ -941,6 +953,8 @@ testDeclaration
     (testCheck (Declaration LetPattern))
   >> it "checks record module instances (RecordInstance)"
     (testCheck (Declaration RecordInstance))
+  >> it "checks instance declarations (Instance)"
+    (testCheck (Declaration Instance'))
 
 testExample
   :: Spec
