@@ -1410,23 +1410,31 @@ checkNiceDeclaration' _ _ (NiceImport r n Nothing DontOpen i)
   >>= \n' -> checkFile r n'
   >>= \c' -> checkImportDirective Import r n' c' i
   >>= \c'' -> pure (accessContextImport n' c'')
+-- FIXME: Both qualified access (via the module name) and unqualified access
+-- (via the open) are stamped with the same range r, so we cannot separately
+-- report an unused open when only qualified access is used.
 checkNiceDeclaration' _ _ (NiceImport r n Nothing DoOpen i)
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
   >>= \n' -> checkFile r n'
   >>= \c' -> checkImportDirective Import r n' c' i
-  >>= \c'' -> pure (accessContextImport n' c'
+  >>= \c'' -> contextInsertRangeAll r c' -- stamp full context for qualified access
+  >>= \c'r -> pure (accessContextImport n' c'r
     <> fromContext (importDirectiveAccess i) c'')
 checkNiceDeclaration' _ _ (NiceImport r n (Just a) DontOpen i)
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
   >>= \n' -> checkFile r n'
   >>= \c' -> checkImportDirective Import r n' c' i
   >>= \c'' -> checkModuleNameMay c'' Public (getRange a) (fromAsName a)
+-- FIXME: Same as above — qualified access (via the alias) and unqualified
+-- access (via the open) share range r.  If only N.foo is used, the open is
+-- redundant but not reported; the module alias is correctly marked used.
 checkNiceDeclaration' _ _ (NiceImport r n (Just a) DoOpen i)
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromQName n)
   >>= \n' -> checkFile r n'
   >>= \c' -> checkImportDirective Import r n' c' i
-  >>= \c'' -> checkModuleNameMay c' Public (getRange a) (fromAsName a)
-  >>= \c''' -> pure (c''' <> fromContext (importDirectiveAccess i) c'')
+  >>= \c'' -> contextInsertRangeAll r c' -- stamp full context for qualified access
+  >>= \c'r -> checkModuleNameMay c'r Public (getRange a) (fromAsName a)
+  >>= \c''' -> pure (fromContext (importDirectiveAccess i) c'' <> c''')
 
 checkNiceDeclaration' fs c (NicePatternSyn _ a n ns p)
   = localSkip (checkNames' False Public RangeVariable (whThing <$> ns))
@@ -1769,6 +1777,9 @@ checkModuleApp c a r a' n o i
     _ -> liftMaybe (ErrorInternal (ErrorName (getRange a'))) (fromName a')
       >>= \a'' -> checkImportDirective Module r (QName a'') c' i
       >>= \c''' -> checkModuleName c''' a r a''
+      -- FIXME: Same open-vs-alias conflation as NiceImport DoOpen — qualified
+      -- and unqualified access share the same range, so a redundant open is
+      -- not detected.
       >>= \c'''' -> case o of
         DontOpen -> pure c''''
         DoOpen -> pure (c'''' <> fromContext (importDirectiveAccess i) c''')

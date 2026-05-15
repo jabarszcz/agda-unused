@@ -405,6 +405,12 @@ data DeclarationTest where
   RecordInstance
     :: DeclarationTest
 
+  QualifiedName
+    :: DeclarationTest
+
+  SubModuleOpen
+    :: DeclarationTest
+
   deriving Show
 
 testDir
@@ -502,6 +508,10 @@ testFileName (Declaration LetPattern)
   = "LetPattern"
 testFileName (Declaration RecordInstance)
   = "RecordInstance"
+testFileName (Declaration QualifiedName)
+  = "QualifiedName"
+testFileName (Declaration SubModuleOpen)
+  = "SubModuleOpen"
 
 testResult
   :: Test
@@ -843,6 +853,19 @@ testResult t
       ~: Postulate
     ]
 
+  Declaration QualifiedName ->
+    [ private (name "suc")
+      ~: ImportItem
+    , public (name "f")
+      ~: Definition
+    ]
+
+  -- open import + open of sub-module: import is marked used by sub-module open
+  Declaration SubModuleOpen ->
+    [ public (name "f")
+      ~: Definition
+    ]
+
 -- ## Main
 
 main
@@ -938,6 +961,10 @@ testDeclaration
     (testCheck (Declaration LetPattern))
   >> it "checks record module instances (RecordInstance)"
     (testCheck (Declaration RecordInstance))
+  >> it "checks qualified alias access clears import (QualifiedName)"
+    (testCheck (Declaration QualifiedName))
+  >> it "checks open import with sub-module open (SubModuleOpen)"
+    (testCheck (Declaration SubModuleOpen))
 
 testExample
   :: Spec
