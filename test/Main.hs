@@ -390,6 +390,9 @@ data DeclarationTest where
   Module'
     :: DeclarationTest
 
+  OperatorSection
+    :: DeclarationTest
+
   deriving Show
 
 testDir
@@ -477,6 +480,8 @@ testFileName (Declaration ModuleMacro)
   = "ModuleMacro"
 testFileName (Declaration Module')
   = "Module"
+testFileName (Declaration OperatorSection)
+  = "OperatorSection"
 
 testResult
   :: Test
@@ -762,6 +767,11 @@ testResult t
       ~: Definition
     ]
 
+  Declaration OperatorSection ->
+    [ public (name "f")
+      ~: Definition
+    ]
+
 -- ## Main
 
 main
@@ -847,6 +857,8 @@ testDeclaration
     (testCheck (Declaration ModuleMacro))
   >> it "checks module definitions (Module)"
     (testCheck (Declaration Module'))
+  >> it "checks operator sections (OperatorSection)"
+    (testCheck (Declaration OperatorSection))
 
 testExample
   :: Spec
