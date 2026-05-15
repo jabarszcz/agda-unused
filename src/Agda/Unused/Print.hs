@@ -234,8 +234,6 @@ printUnsupportedError
   -> Text
 printUnsupportedError UnsupportedLoneConstructor
   = "Lone constructors"
-printUnsupportedError UnsupportedMacro
-  = "Record module instance applications"
 printUnsupportedError UnsupportedUnquote
   = "Unquoting primitives"
 

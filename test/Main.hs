@@ -402,6 +402,9 @@ data DeclarationTest where
   LetPattern
     :: DeclarationTest
 
+  RecordInstance
+    :: DeclarationTest
+
   deriving Show
 
 testDir
@@ -497,6 +500,8 @@ testFileName (Declaration LeftLet')
   = "LeftLet"
 testFileName (Declaration LetPattern)
   = "LetPattern"
+testFileName (Declaration RecordInstance)
+  = "RecordInstance"
 
 testResult
   :: Test
@@ -808,6 +813,28 @@ testResult t
       ~: Definition
     ]
 
+  -- SectionApp via explicit arg: B unused in anonymous open; M.A used.
+  -- RecordModuleInstance via ⦃ ... ⦄: N.B used; two anonymous opens
+  --   (one entirely unused, one with A' unused but B' used).
+  Declaration RecordInstance ->
+    [ private (name "B")    -- SectionApp open: B not referenced
+      ~: OpenItem
+    , public (name "a")     -- postulate using opened A
+      ~: Postulate
+    , public (name "b")     -- postulate using M.A
+      ~: Postulate
+    , public (name "c")     -- postulate using N.B
+      ~: Postulate
+    , private (name "R")    -- RecordModuleInstance open: entirely unused
+      ~: Open
+    , private (name "A")    -- RecordModuleInstance open: A not referenced
+      ~: OpenItem
+    , private (name "A'")   -- RecordModuleInstance open: A' not referenced (B' used)
+      ~: OpenItem
+    , public (name "d")     -- postulate using opened B'
+      ~: Postulate
+    ]
+
 -- ## Main
 
 main
@@ -901,6 +928,8 @@ testDeclaration
     (testCheck (Declaration LeftLet'))
   >> it "checks let-patterns in type signatures (LetPattern)"
     (testCheck (Declaration LetPattern))
+  >> it "checks record module instances (RecordInstance)"
+    (testCheck (Declaration RecordInstance))
 
 testExample
   :: Spec
