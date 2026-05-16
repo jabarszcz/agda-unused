@@ -193,9 +193,6 @@ printInternalError (ErrorConstructor r)
 printInternalError (ErrorLet r)
   = printMessage (printRange r)
   $ "Internal error: Invalid let statement."
-printInternalError (ErrorModuleName n)
-  = printMessage (T.pack n)
-  $ "Internal error: Empty top-level module name."
 printInternalError (ErrorName r)
   = printMessage (printRange r)
   $ "Internal error: Invalid name."
