@@ -5,6 +5,7 @@ Printing functions for unused items and errors.
 -}
 module Agda.Unused.Print
   ( printError
+  , printQName
   , printUnused
   , printUnusedItems
   , printNothing
@@ -29,12 +30,13 @@ import Agda.Syntax.Position
   (Range, Range'(..), RangeFile(..), getRange)
 import Agda.Syntax.Common.Pretty
   (prettyShow)
+import Data.Semigroup
+  (sconcat)
+
 import Agda.Utils.FileName
   (AbsolutePath(..), filePath)
 import qualified Agda.Utils.Maybe.Strict
   as S
-import Data.Semigroup
-  (sconcat)
 import Data.Text
   (Text)
 import qualified Data.Text
@@ -299,6 +301,9 @@ printRangeInfo
   -> Text
 printRangeInfo (RangeNamed t n)
   = T.unwords ["unused", printRangeType t, quote (printQName n)]
+printRangeInfo (RangeRenamed t orig tgt)
+  = T.unwords ["unused", printRangeType t, "renaming",
+      quote (printQName orig), "to", quote (printQName tgt)]
 printRangeInfo RangeMutual
   = "unused mutually recursive definition"
 

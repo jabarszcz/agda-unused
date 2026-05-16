@@ -63,6 +63,12 @@ module Agda.Unused.Types.Context
   , accessContextModule
   , accessContextModule'
   , accessContextImport
+  , accessContextInstance
+
+    -- * Instances
+
+  , contextHasInstances
+  , contextSetInstances
 
     -- * Conversion
 
@@ -212,6 +218,11 @@ data Context
     :: !(Map Name Item)
   , contextModules
     :: !(Map Name Module)
+  , contextHasInstances
+    :: !Bool
+    -- ^ Whether an @instance@ block was seen in this module or in a
+    -- publicly re-exported import. This is a syntactic approximation:
+    -- we cannot track whether the instances are actually used.
   } deriving Show
 
 -- | A namespace of definitions, which may be public or private. Any collection
@@ -224,6 +235,10 @@ data AccessContext
     :: !(Map Name AccessModule)
   , accessContextImports
     :: !(Map QName Context)
+  , accessContextHasInstances
+    :: !Bool
+    -- ^ Whether an @instance@ block was seen in this context.
+    -- Syntactic approximation only.
   } deriving Show
 
 -- | If both items are constructors, collect the private and public ranges for
@@ -236,21 +251,21 @@ instance Semigroup AccessItem where
 
 -- | Prefer values from second context.
 instance Semigroup Context where
-  Context is1 ms1 <> Context is2 ms2
-    = Context (is2 <> is1) (ms2 <> ms1)
+  Context is1 ms1 h1 <> Context is2 ms2 h2
+    = Context (is2 <> is1) (ms2 <> ms1) (h1 || h2)
 
 -- | Prefer values from second access context.
 instance Semigroup AccessContext where
-  AccessContext is1 ms1 js1 <> AccessContext is2 ms2 js2
-    = AccessContext (Map.unionWith (<>) is1 is2) (ms2 <> ms1) (js2 <> js1)
+  AccessContext is1 ms1 js1 h1 <> AccessContext is2 ms2 js2 h2
+    = AccessContext (Map.unionWith (<>) is1 is2) (ms2 <> ms1) (js2 <> js1) (h1 || h2)
 
 instance Monoid Context where
   mempty
-    = Context mempty mempty
+    = Context mempty mempty False
 
 instance Monoid AccessContext where
   mempty
-    = AccessContext mempty mempty mempty
+    = AccessContext mempty mempty mempty False
 
 -- Ensure public names are not shadowed by private names.
 accessItemUnion
@@ -301,7 +316,7 @@ accessContextUnion
   :: AccessContext
   -> AccessContext
   -> AccessContext
-accessContextUnion (AccessContext is1 ms1 js1) (AccessContext is2 ms2 js2)
+accessContextUnion (AccessContext is1 ms1 js1 h1) (AccessContext is2 ms2 js2 h2)
   = AccessContext
   { accessContextItems
     = Map.unionWith accessItemUnion is1 is2
@@ -309,6 +324,8 @@ accessContextUnion (AccessContext is1 ms1 js1) (AccessContext is2 ms2 js2)
     = Map.unionWith accessModuleUnion ms1 ms2
   , accessContextImports
     = js2 <> js1
+  , accessContextHasInstances
+    = h1 || h2
   }
 
 -- ## Interface
@@ -338,9 +355,9 @@ contextLookupModule
   :: QName
   -> Context
   -> Maybe Module
-contextLookupModule (QName n) (Context _ ms)
+contextLookupModule (QName n) (Context _ ms _)
   = Map.lookup n ms
-contextLookupModule (Qual n ns) (Context _ ms)
+contextLookupModule (Qual n ns) (Context _ ms _)
   = Map.lookup n ms >>= contextLookupModule ns . moduleContext
 
 -- | Get the item for the given name, or 'Nothing' if not in context.
@@ -348,9 +365,9 @@ contextLookupItem
   :: QName
   -> Context
   -> Maybe Item
-contextLookupItem (QName n) (Context is _)
+contextLookupItem (QName n) (Context is _ _)
   = Map.lookup n is
-contextLookupItem (Qual n ns) (Context _ ms)
+contextLookupItem (Qual n ns) (Context _ ms _)
   = Map.lookup n ms >>= contextLookupItem ns . moduleContext
 
 -- | Get the ranges for the given name, or produce a 'LookupError'.
@@ -358,7 +375,7 @@ accessContextLookup
   :: QName
   -> AccessContext
   -> Either LookupError (Set Range)
-accessContextLookup n c@(AccessContext _ _ is)
+accessContextLookup n c@(AccessContext _ _ is _)
   = contextLookup n (toContext' c)
   <|> Map.mapWithKey (accessContextLookupImport n) is
 
@@ -367,7 +384,7 @@ accessContextLookupModule
   :: QName
   -> AccessContext
   -> Either LookupError Module
-accessContextLookupModule n c@(AccessContext _ _ is)
+accessContextLookupModule n c@(AccessContext _ _ is _)
   = contextLookupModule n (toContext' c)
   <|> Map.mapWithKey (accessContextLookupModuleImport n) is
 
@@ -422,7 +439,7 @@ accessContextLookupDefining
   :: QName
   -> AccessContext
   -> Either LookupError (Bool, Set Range)
-accessContextLookupDefining (QName n) (AccessContext is _ _)
+accessContextLookupDefining (QName n) (AccessContext is _ _ _)
   = maybe
     (Left LookupNotFound)
     (\i -> Right (accessItemDefining i, accessItemRanges i))
@@ -494,20 +511,20 @@ contextInsertRangeAll
   :: Range
   -> Context
   -> Context
-contextInsertRangeAll r (Context is ms)
-  = Context
-    (itemInsertRange r <$> is)
-    (moduleInsertRangeAll r <$> ms)
+contextInsertRangeAll r c@(Context is ms _)
+  = c { contextItems = itemInsertRange r <$> is
+      , contextModules = moduleInsertRangeAll r <$> ms
+      }
 
 -- | Insert a range for all names in an access context.
 accessContextInsertRangeAll
   :: Range
   -> AccessContext
   -> AccessContext
-accessContextInsertRangeAll r (AccessContext is ms js)
-  = AccessContext
-    (accessItemInsertRange r <$> is)
-    (accessModuleInsertRangeAll r <$> ms) js
+accessContextInsertRangeAll r c@(AccessContext is ms _ _)
+  = c { accessContextItems = accessItemInsertRange r <$> is
+      , accessContextModules = accessModuleInsertRangeAll r <$> ms
+      }
 
 -- ### Delete
 
@@ -516,16 +533,16 @@ contextDelete
   :: Name
   -> Context
   -> Context
-contextDelete n (Context is ms)
-  = Context (Map.delete n is) ms
+contextDelete n c
+  = c { contextItems = Map.delete n (contextItems c) }
 
 -- | Delete a module from the context.
 contextDeleteModule
   :: Name
   -> Context
   -> Context
-contextDeleteModule n (Context is ms)
-  = Context is (Map.delete n ms)
+contextDeleteModule n c
+  = c { contextModules = Map.delete n (contextModules c) }
 
 -- ### Define
 
@@ -554,15 +571,15 @@ accessContextDefine
   :: Name
   -> AccessContext
   -> AccessContext
-accessContextDefine n (AccessContext is ms js)
-  = AccessContext (Map.adjust accessItemDefine n is) ms js
+accessContextDefine n c@(AccessContext is _ _ _)
+  = c { accessContextItems = Map.adjust accessItemDefine n is }
 
 -- | Mark all fields as in process of being defined.
 accessContextDefineFields
   :: AccessContext
   -> AccessContext
-accessContextDefineFields (AccessContext is ms js)
-  = AccessContext (Map.map accessItemDefineField is) ms js
+accessContextDefineFields c@(AccessContext is _ _ _)
+  = c { accessContextItems = Map.map accessItemDefineField is }
 
 -- ### Ranges
 
@@ -594,7 +611,7 @@ moduleRanges (Module rs c)
 contextRanges
   :: Context
   -> Set Range
-contextRanges (Context is ms)
+contextRanges (Context is ms _)
   = mconcat (itemRanges <$> Map.elems is)
   <> mconcat (moduleRanges <$> Map.elems ms)
 
@@ -602,7 +619,7 @@ contextRanges (Context is ms)
 accessContextRanges
   :: AccessContext
   -> Set Range
-accessContextRanges c@(AccessContext _ _ js)
+accessContextRanges c@(AccessContext _ _ js _)
   = contextRanges (toContext' c)
   <> mconcat (contextRanges <$> Map.elems js)
 
@@ -613,7 +630,7 @@ accessContextMatch
   :: [String]
   -> AccessContext
   -> [Name]
-accessContextMatch ss (AccessContext is _ _)
+accessContextMatch ss (AccessContext is _ _ _)
   = matchOperators ss (Map.keys is)
 
 -- ## Construction
@@ -624,7 +641,7 @@ contextItem
   -> Item
   -> Context
 contextItem n i
-  = Context (Map.singleton n i) mempty
+  = Context (Map.singleton n i) mempty False
 
 -- | Construct a 'Context' with a single module.
 contextModule
@@ -632,7 +649,7 @@ contextModule
   -> Module
   -> Context
 contextModule n m
-  = Context mempty (Map.singleton n m)
+  = Context mempty (Map.singleton n m) False
 
 -- | Construct an 'AccessContext' with a single constructor.
 accessContextConstructor
@@ -690,7 +707,7 @@ accessContextModule
   -> AccessModule
   -> AccessContext
 accessContextModule n m
-  = AccessContext mempty (Map.singleton n m) mempty
+  = AccessContext mempty (Map.singleton n m) mempty False
 
 -- | Like 'accessContextModule', but taking an access context. We convert the
 -- given access context to an ordinary context using 'toContext':
@@ -714,7 +731,16 @@ accessContextImport
   -> Context
   -> AccessContext
 accessContextImport n c
-  = AccessContext mempty mempty (Map.singleton n c)
+  = AccessContext mempty mempty (Map.singleton n c) False
+
+-- | An empty 'AccessContext' with the instance flag set.
+accessContextInstance :: AccessContext
+accessContextInstance
+  = mempty { accessContextHasInstances = True }
+
+-- | Mark a 'Context' as having instances.
+contextSetInstances :: Context -> Context
+contextSetInstances c = c { contextHasInstances = True }
 
 -- ## Conversion
 
@@ -791,25 +817,26 @@ fromContext
   :: Access
   -> Context
   -> AccessContext
-fromContext a (Context is ms)
+fromContext a (Context is ms h)
   = AccessContext
     (Map.map (fromItem a) is <> Map.fromList (Map.elems is >>= fromItemSyntax))
     (Map.map (fromModule a) ms)
     mempty
+    h
 
 -- | Convert an 'AccessContext' to 'Context'. Discard private items and imports.
 toContext
   :: AccessContext
   -> Context
-toContext (AccessContext is ms _)
-  = Context (Map.mapMaybe toItem is) (Map.mapMaybe toModule ms)
+toContext (AccessContext is ms _ h)
+  = Context (Map.mapMaybe toItem is) (Map.mapMaybe toModule ms) h
 
 -- Like 'toContext`, but keep private items.
 toContext'
   :: AccessContext
   -> Context
-toContext' (AccessContext is ms _)
-  = Context (Map.map toItem' is) (Map.map toModule' ms)
+toContext' (AccessContext is ms _ h)
+  = Context (Map.map toItem' is) (Map.map toModule' ms) h
 
 toField
   :: AccessItem
@@ -825,6 +852,6 @@ toField i
 toFields
   :: AccessContext
   -> AccessContext
-toFields (AccessContext is ms js)
-  = AccessContext (Map.map toField is) ms js
+toFields c@(AccessContext is _ _ _)
+  = c { accessContextItems = Map.map toField is }
 

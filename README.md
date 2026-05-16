@@ -61,7 +61,7 @@ agda-unused - check for unused code in an Agda project
 
 Usage: agda-unused [FILE] [(-g|--global) | --local]
                    [(--only CATEGORY) | (--all-but CATEGORY) | --all]
-                   [-j|--json] [--config FILE | --no-config]
+                   [-j|--json] [--config FILE | --no-config] [--fix]
 
   Check for unused code in FILE (or use 'file' from config)
 
@@ -80,6 +80,7 @@ Available options:
   -j,--json                Format output as JSON
   --config FILE            Use this config file instead of auto-discovery
   --no-config              Don't load any config file
+  --fix                    Auto-remove unused imports and items
 
 Categories: data, definitions, imports, import-items, modules, module-items,
 opens, open-items, pattern-synonyms, postulates, records, record-constructors,
@@ -174,16 +175,27 @@ drawbacks:
 - We do not distinguish between overloaded constructors; if a constructor is
   used, then we mark all constructors in scope with the same name as used.
 
+Since `agda-unused` works on concrete syntax without type-checking, it cannot
+track usage that happens implicitly:
+
+- **Instance declarations** are automatically marked as used, since
+  determining which instances are selected requires type-checking.
+- **Imports needed only for instances** cannot be distinguished from truly
+  unused imports. For *reporting* this is acceptable: the user can review
+  and decide. But for `--fix` (see below), deleting an import that silently
+  provides instances would break the module. To avoid this, `--fix` uses a
+  syntactic heuristic: if an `instance` block appeared in a module (or was
+  re-exported via `public`), the import is kept and only individual items
+  are removed from its `using` list. This is an approximation; we cannot
+  verify that the instances are actually used. For reporting, use the
+  `-- agda-unused: instances` suppression comment (see below).
+
 Additionally, we currently do not support the following Agda features:
 
 - [unquoting declarations](https://agda.readthedocs.io/en/v2.8.0/language/reflection.html#id3)
 - [lone constructors](https://agda.readthedocs.io/en/v2.8.0/language/mutual-recursion.html#interleaved-mutual-blocks)
 
 `agda-unused` will produce an error if your code uses these language features.
-
-Instance declarations are always treated as used, since determining which
-instances are selected requires type-checking.  Imports that only provide
-instances can be suppressed with `-- agda-unused: instances` (see below).
 
 When `open import M as N` or `open module N = M` is used, qualified access
 (`N.foo`) and unqualified access (`foo`) are tracked together.  This means that
@@ -214,3 +226,40 @@ The `instances` marker only suppresses the whole-import report. If the import
 has a `using` list with individually unused items, those are still reported.
 This is useful since `agda-unused` does not perform type checking and cannot
 determine whether instances from an import are actually used.
+
+## Auto-fix (experimental)
+
+The `--fix` flag automatically removes unused items from `using` lists and
+deletes entirely unused import/open statements. It modifies files in place
+and may produce incorrect edits, so commit your changes before running it
+and review the diff afterwards.
+
+```
+$ agda-unused Test.agda --fix
+```
+
+How it works:
+
+- **Unused imports (no instances detected)**: The entire import line is
+  deleted.
+- **Imports that may provide instances** (see Limitations above): Individual
+  items are removed from the `using` list, but the import itself is kept
+  (with `using ()` if all named items were removed).
+- **Re-check**: After applying fixes, `agda-unused` re-checks with fresh
+  positions and reports any remaining issues.
+
+Fixes are reported to stderr:
+
+```
+Fixed:
+  import Agda.Builtin.Unit: deleted
+  import Agda.Builtin.Bool: removed 'true'
+```
+
+Item removal makes a best effort to preserve the original formatting style
+(indentation, placement of parentheses, leading vs. trailing semicolons).
+Currently only `using` lists are edited; `hiding` and `renaming` lists are
+not auto-fixed.
+
+Items that cannot be auto-fixed (e.g. unused definitions, variables) are
+reported normally after the fix pass.

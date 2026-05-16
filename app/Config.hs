@@ -127,6 +127,7 @@ allCategoryLabels
 -- | Determine the category of a range info.
 categoryOf :: RangeInfo -> Category
 categoryOf (RangeNamed rt _) = Category rt
+categoryOf (RangeRenamed rt _ _) = Category rt
 categoryOf RangeMutual = CategoryMutual
 
 -- ## YAML Parsing

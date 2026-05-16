@@ -5,6 +5,7 @@ Check an Agda project for unused code.
 -}
 module Agda.Unused.Check
   ( checkUnused
+  , checkUnusedForFix
   , checkUnusedGlobal
   , checkUnusedWith
   ) where
@@ -19,8 +20,11 @@ import Agda.Unused.Monad.Reader
     askSkip, localGlobal, localSkip, localSuppressions)
 import Agda.Unused.Monad.State
   (ModuleState(..), State, getHash, getModule, getSources, modifyBlock,
-    modifyCheck, modifyDelete, modifyInsert, modifySources, stateEmpty,
-    stateItems, stateModules)
+    modifyCheck, modifyDelete, modifyInsert,
+    modifyInsertImportRange, modifySources, stateEmpty, stateItems,
+    stateItemsUnfiltered, stateImportRanges, stateModuleStates, stateModules)
+import Agda.Unused.Fix
+  (ImportFix, classifyFixes)
 import Agda.Unused.Suppress
   (SuppressionMap, extractSuppressions)
 import Agda.Unused.Types.Access
@@ -32,9 +36,11 @@ import Agda.Unused.Types.Context
     accessContextLookup, accessContextLookupDefining, accessContextLookupModule,
     accessContextLookupSpecial, accessContextMatch, accessContextModule,
     accessContextModule', accessContextPattern, accessContextRanges,
-    accessContextUnion, contextDelete, contextDeleteModule, contextItem,
-    contextLookupItem, contextLookupModule, contextModule, contextRanges,
-    fromContext, moduleRanges, toContext)
+    accessContextUnion, accessContextInstance, contextHasInstances,
+    contextSetInstances, contextDelete,
+    contextDeleteModule, contextItem, contextLookupItem,
+    contextLookupModule, contextModule, contextRanges, fromContext,
+    moduleRanges, toContext)
 import qualified Agda.Unused.Types.Context
   as C
 import Agda.Unused.Types.Name
@@ -1334,7 +1340,7 @@ checkNiceDeclaration'
 
 checkNiceDeclaration' fs c (Axiom _ a _ i _ n e)
   = checkExpr c e >> checkName' False fs (fromAccess a) RangePostulate n
-  >>= \c' -> markInstance i n >> pure c'
+  >>= \c' -> (c' <>) <$> markInstance i n
 checkNiceDeclaration' _ _ (NiceField r _ _ _ _ _ _)
   = throwError (ErrorInternal (ErrorUnexpected UnexpectedField r))
 checkNiceDeclaration' fs c (PrimitiveFunction _ a _ n (Arg _ e))
@@ -1358,7 +1364,7 @@ checkNiceDeclaration' _ _ (NiceFunClause r _ _ _ _ _ _)
   = throwError (ErrorInternal (ErrorUnexpected UnexpectedNiceFunClause r))
 checkNiceDeclaration' fs c (FunSig _ a _ i _ _ _ _ n e)
   = checkExpr c e >> checkName' False fs (fromAccess a) RangeDefinition n
-  >>= \c' -> markInstance i n >> pure c'
+  >>= \c' -> (c' <>) <$> markInstance i n
 checkNiceDeclaration' _ c (FunDef _ _ _ _ _ _ _ cs)
   = checkClauses c cs >> pure mempty
 checkNiceDeclaration' fs c (NiceDataDef _ _ _ _ _ n bs cs)
@@ -1835,14 +1841,16 @@ checkImportDirective
   -> m Context
 checkImportDirective dt r n c (ImportDirective _ UseEverything hs rs _)
   = traverse (\t -> modifyInsert r (RangeNamed t n)) (directiveStatement dt)
+  >> modifyInsertImportRange r n -- lets classifyFixes find parent import of items
   >> modifyHidings c (hs <> (renFrom <$> rs))
   >>= \c' -> checkRenamings dt c rs
-  >>= \c'' -> contextInsertRangeAll r (c' <> c'')
+  >>= \c'' -> propagateInstances c <$> contextInsertRangeAll r (c' <> c'')
 checkImportDirective dt r n c (ImportDirective _ (Using ns) _ rs _)
   = traverse (\t -> modifyInsert r (RangeNamed t n)) (directiveStatement dt)
+  >> modifyInsertImportRange r n -- lets classifyFixes find parent import of items
   >> checkImportedNames dt c ns
   >>= \c' -> checkRenamings dt c rs
-  >>= \c'' -> contextInsertRangeAll r (c' <> c'')
+  >>= \c'' -> propagateInstances c <$> contextInsertRangeAll r (c' <> c'')
 
 checkRenaming
   :: MonadReader Environment m
@@ -1853,7 +1861,10 @@ checkRenaming
   -> Renaming
   -> m Context
 checkRenaming dt c r@(Renaming n t _ _)
-  = checkImportedNamePair dt c (getRange r, n, t)
+  = checkImportedNamePair (importedQName n) dt c (getRange r, n, t)
+  where
+    importedQName (ImportedName nm) = QName <$> fromName nm
+    importedQName (ImportedModule nm) = QName <$> fromName nm
 
 checkRenamings
   :: MonadError Error m
@@ -1875,33 +1886,39 @@ checkImportedName
   -> ImportedName
   -> m Context
 checkImportedName dt c n
-  = checkImportedNamePair dt c (getRange n, n, n)
+  = checkImportedNamePair Nothing dt c (getRange n, n, n)
 
 checkImportedNamePair
   :: MonadError Error m
   => MonadReader Environment m
   => MonadState State m
-  => DirectiveType
+  => Maybe QName
+  -- ^ Original name for renamings, 'Nothing' for regular items.
+  -> DirectiveType
   -> Context
   -> (Range, ImportedName, ImportedName)
   -> m Context
-checkImportedNamePair dt c (_, ImportedName n, ImportedName t)
+checkImportedNamePair mOrig dt c (_, ImportedName n, ImportedName t)
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromName n)
   >>= \n' -> liftMaybe (ErrorInternal (ErrorName (getRange t)))
     (fromNameRange t)
-  >>= \(r, t') -> modifyInsert r (RangeNamed (directiveItem dt) (QName t'))
+  >>= \(r, t') -> modifyInsert r (rangeInfoFor mOrig dt (QName t'))
   >> pure (maybe mempty (contextItem t') (contextLookupItem (QName n') c)
     <> maybe mempty (contextModule t') (contextLookupModule (QName n') c))
   >>= contextInsertRangeAll r
-checkImportedNamePair dt c (_, ImportedModule n, ImportedModule t)
+checkImportedNamePair mOrig dt c (_, ImportedModule n, ImportedModule t)
   = liftMaybe (ErrorInternal (ErrorName (getRange n))) (fromName n)
   >>= \n' -> liftMaybe (ErrorInternal (ErrorName (getRange t)))
     (fromNameRange t)
-  >>= \(r, t') -> modifyInsert r (RangeNamed (directiveItem dt) (QName t'))
+  >>= \(r, t') -> modifyInsert r (rangeInfoFor mOrig dt (QName t'))
   >> pure (maybe mempty (contextModule t') (contextLookupModule (QName n') c))
   >>= contextInsertRangeAll r
-checkImportedNamePair _ _ (r, _, _)
+checkImportedNamePair _ _ _ (r, _, _)
   = throwError (ErrorInternal (ErrorRenaming r))
+
+rangeInfoFor :: Maybe QName -> DirectiveType -> QName -> RangeInfo
+rangeInfoFor Nothing   dt tgt = RangeNamed (directiveItem dt) tgt
+rangeInfoFor (Just orig) dt tgt = RangeRenamed (directiveItem dt) orig tgt
 
 checkImportedNames
   :: MonadError Error m
@@ -2275,6 +2292,33 @@ checkUnusedWith m opts
   . fmap (UnusedItems . stateItems . snd)
   . checkFileTop m opts
 
+-- | Like 'checkUnused', but also classify unused items into fixable
+-- actions.
+checkUnusedForFix
+  :: Mode
+  -- ^ The check mode to use.
+  -> UnusedOptions
+  -- ^ Options to use.
+  -> FilePath
+  -- ^ Absolute path of the file to check.
+  -> IO (Either Error [ImportFix])
+checkUnusedForFix mode opts p = runExceptT $ do
+  (_, s) <- checkFileTop mode opts p
+  let items = case mode of
+        GlobalMain -> filter (not . inFile p) (stateItemsUnfiltered s)
+        _          -> stateItemsUnfiltered s
+      instanceMods = instanceModulesFromState s
+  pure (classifyFixes instanceMods (stateImportRanges s) items)
+
+-- | Extract module names where an @instance@ block was seen (syntactic
+-- approximation; does not verify that instances are actually used).
+instanceModulesFromState :: State -> Set QName
+instanceModulesFromState
+  = Set.fromList . mapMaybe hasInst . Map.toList . stateModuleStates
+  where
+    hasInst (n, Checked c) | contextHasInstances c = Just n
+    hasInst _ = Nothing
+
 -- | Check an Agda file and its dependencies for unused code, including public
 -- items in dependencies, as well as files.
 --
@@ -2331,16 +2375,26 @@ inFile p (r, _)
 
 -- | Mark an instance declaration as used.  Determining which instances
 -- are selected requires type-checking, which agda-unused does not perform.
+-- Returns an 'AccessContext' with the instance flag set.
 markInstance
   :: MonadReader Environment m
   => MonadState State m
   => IsInstance
   -> N.Name
-  -> m ()
+  -> m AccessContext
 markInstance (InstanceDef _) n
   = modifyDelete (Set.singleton (nameRange n))
+  >> pure accessContextInstance
 markInstance NotInstanceDef _
-  = pure ()
+  = pure mempty
+
+-- | Propagate the instance flag from source to result, so that modules
+-- re-exporting via @public@ inherit the flag. Part of the syntactic
+-- instance heuristic.
+propagateInstances :: Context -> Context -> Context
+propagateInstances src result
+  | contextHasInstances src = contextSetInstances result
+  | otherwise = result
 
 showTCErr :: TCErr -> String
 showTCErr (TypeError _ _ cl)

@@ -14,7 +14,10 @@ module Agda.Unused.Monad.State
 
   , stateEmpty
   , stateItems
+  , stateItemsUnfiltered
   , stateModules
+  , stateModuleStates
+  , stateImportRanges
 
     -- * Get
 
@@ -29,6 +32,7 @@ module Agda.Unused.Monad.State
   , modifyBlock
   , modifyCheck
   , modifySources
+  , modifyInsertImportRange
 
   ) where
 
@@ -102,6 +106,10 @@ data State
   , stateHash
     :: !Word64
     -- ^ An integer to use as the next module hash.
+  , stateImportRanges'
+    :: !(Map Range QName)
+    -- ^ Maps import/open ranges to their module name.
+    --   Used by --fix to find the parent import for unused items.
   }
 
 -- ## Interface
@@ -113,9 +121,9 @@ stateEmpty
 stateEmpty primLibDir
   = State mempty mempty
       (ModuleToSource (FileDictWithBuiltins (empty :: FileDictBuilder) empty primLibDir) Map.empty)
-      0
+      0 mempty
 
--- | Get a sorted list of state items.
+-- | Get a sorted list of state items, filtering out nested items.
 --
 -- If one state item contains another (e.g., an @open@ statement containing
 -- @using@ directives), then keep only the containing item.
@@ -125,6 +133,16 @@ stateItems
 stateItems
   = stateItemsFilter
   . Map.toAscList
+  . stateItems'
+
+-- | Get a sorted list of all state items, including nested ones.
+-- Used by the fix path which needs both parent import ranges and
+-- child item ranges for 'classifyFixes'.
+stateItemsUnfiltered
+  :: State
+  -> [(Range, RangeInfo)]
+stateItemsUnfiltered
+  = Map.toAscList
   . stateItems'
 
 -- Remove nested items.
@@ -148,12 +166,27 @@ stateModules
   = Map.keysSet
   . stateModules'
 
+-- | Get all module states (for extracting instance info).
+stateModuleStates
+  :: State
+  -> Map QName ModuleState
+stateModuleStates
+  = stateModules'
+
+-- | Get import/open ranges mapped to their module names.
+--   Used by --fix to find the parent import for unused items.
+stateImportRanges
+  :: State
+  -> Map Range QName
+stateImportRanges
+  = stateImportRanges'
+
 stateSources
   :: ModuleToSource
   -> State
   -> State
-stateSources ss (State rs ms _ h)
-  = State rs ms ss h
+stateSources ss s
+  = s { stateSources' = ss }
 
 stateInsert
   :: Range
@@ -162,43 +195,43 @@ stateInsert
   -> State
 stateInsert NoRange _ s
   = s
-stateInsert r@(Range _ _) i (State rs ms ss h)
-  = State (Map.insert r i rs) ms ss h
+stateInsert r@(Range _ _) i s
+  = s { stateItems' = Map.insert r i (stateItems' s) }
 
 stateDelete
   :: Set Range
   -> State
   -> State
-stateDelete rs (State rs' ms ss h)
-  = State (Map.withoutKeys rs' rs) ms ss h
+stateDelete rs s
+  = s { stateItems' = Map.withoutKeys (stateItems' s) rs }
 
 stateModule
   :: QName
   -> State
   -> Maybe ModuleState
-stateModule n (State _ ms _ _)
-  = Map.lookup n ms
+stateModule n s
+  = Map.lookup n (stateModules' s)
 
 stateBlock
   :: QName
   -> State
   -> State
-stateBlock n (State rs ms ss h)
-  = State rs (Map.insert n Blocked ms) ss h
+stateBlock n s
+  = s { stateModules' = Map.insert n Blocked (stateModules' s) }
 
 stateCheck
   :: QName
   -> Context
   -> State
   -> State
-stateCheck n c (State rs ms ss h)
-  = State rs (Map.insert n (Checked c) ms) ss h
+stateCheck n c s
+  = s { stateModules' = Map.insert n (Checked c) (stateModules' s) }
 
 stateIncrementHash
   :: State
   -> State
-stateIncrementHash (State rs ms ss h)
-  = State rs ms ss (succ h)
+stateIncrementHash s
+  = s { stateHash = succ (stateHash s) }
 
 -- ## Get
 
@@ -276,4 +309,16 @@ modifySources
   -> m ()
 modifySources ss
   = modify (stateSources ss)
+
+-- | Record an import/open range and its module name.
+--   Used by --fix to find the parent import for unused items.
+modifyInsertImportRange
+  :: MonadState State m
+  => Range
+  -> QName
+  -> m ()
+modifyInsertImportRange NoRange _
+  = pure ()
+modifyInsertImportRange r n
+  = modify (\s -> s { stateImportRanges' = Map.insert r n (stateImportRanges' s) })
 

@@ -1,5 +1,8 @@
 module Main where
 
+import TestFix
+  (testApplyFixes, testFixInstance, testFixSmoke)
+
 import Agda.Unused
   (UnusedItems(..), UnusedOptions(..))
 import Agda.Unused.Check
@@ -7,7 +10,7 @@ import Agda.Unused.Check
 import Agda.Unused.Monad.Error
   (Error)
 import Agda.Unused.Monad.Reader
-  (Mode(..))
+  (Mode(Local, Global))
 import Agda.Unused.Print
   (printError, printUnusedItems)
 import Agda.Unused.Types.Access
@@ -186,6 +189,15 @@ public n
   -> (Access, RangeInfo)
 (a, n) ~: t
   = (a, rangeInfo n t)
+
+renamedFrom
+  :: QName
+  -> (Access, RangeInfo)
+  -> (Access, RangeInfo)
+renamedFrom orig (a, RangeNamed rt tgt)
+  = (a, RangeRenamed rt orig tgt)
+renamedFrom _ x
+  = x
 
 -- ## Expectations
 
@@ -785,7 +797,8 @@ testResult t
       ~: Open
     , public (name "Q")
       ~: Module
-    , private (name "x'")
+    , renamedFrom (name "x") $
+      private (name "x'")
       ~: OpenItem
     , public (name "v")
       ~: Definition
@@ -794,7 +807,8 @@ testResult t
     ]
 
   Declaration Open2 ->
-    [ public (name "z")
+    [ renamedFrom (name "y") $
+      public (name "z")
       ~: OpenItem
     , public (name "p")
       ~: Postulate
@@ -816,7 +830,8 @@ testResult t
       ~: Variable
     , public (name "Q")
       ~: Module
-    , public (name "A'")
+    , renamedFrom (name "A") $
+      public (name "A'")
       ~: ModuleItem
     , public (name "C")
       ~: Definition
@@ -877,7 +892,8 @@ testResult t
       ~: Open
     , private (name "A")    -- RecordModuleInstance open: A not referenced
       ~: OpenItem
-    , private (name "A'")   -- RecordModuleInstance open: A' not referenced (B' used)
+    , renamedFrom (name "A") $
+      private (name "A'")   -- RecordModuleInstance open: A' not referenced (B' used)
       ~: OpenItem
     , public (name "d")     -- postulate using opened B'
       ~: Postulate
@@ -952,6 +968,9 @@ testAll
   >> testDeclaration
   >> testExample
   >> testIntegration
+  >> testApplyFixes
+  >> testFixInstance
+  >> testFixSmoke
 
 testPattern
   :: Spec

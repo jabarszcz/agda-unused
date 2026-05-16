@@ -3,9 +3,13 @@ module Main where
 import Agda.Unused
   (UnusedOptions(..))
 import Agda.Unused.Check
-  (checkUnused, checkUnusedGlobal)
+  (checkUnused, checkUnusedForFix, checkUnusedGlobal)
+import Agda.Unused.Fix
+  (Edit, ImportFix, applyFixes, importFixEdits, printImportFix)
 import Agda.Unused.Monad.Error
   (Error)
+import Agda.Unused.Monad.Reader
+  (Mode(..))
 import Agda.Unused.Print
   (printError, printNothing, printUnused, printUnusedItems,
     relativizeUnused, relativizeUnusedItems)
@@ -24,6 +28,8 @@ import Data.Aeson
   (Value(..), (.=), object)
 import Data.Aeson.Text
   (encodeToLazyText)
+import qualified Data.Map.Strict
+  as Map
 import Data.Text
   (Text)
 import qualified Data.Text
@@ -64,6 +70,9 @@ data Options
   , optionsConfigMode
     :: !ConfigMode
     -- ^ How to find the config file.
+  , optionsFix
+    :: !Bool
+    -- ^ Whether to auto-fix unused imports and items.
   } deriving Show
 
 optionsParser
@@ -82,6 +91,9 @@ optionsParser
     <|> ConfigNone <$ flag' () (long "no-config"
     <> help "Don't load any config file")
     <|> pure ConfigAuto)
+  <*> (switch
+    $ long "fix"
+    <> help "Auto-remove unused imports and items")
 
 configParser
   :: Parser Config
@@ -327,7 +339,7 @@ check opts = do
   (filePath, globalMode, filt, unusedOpts)
     <- mergeValidateOpts (optionsConfig opts) mYaml
   _
-    <- checkWith cwd filt unusedOpts filePath globalMode (optionsJSON opts)
+    <- checkWith cwd filt unusedOpts filePath globalMode (optionsFix opts) (optionsJSON opts)
   pure ()
 
 checkWith
@@ -342,16 +354,71 @@ checkWith
   -> Bool
   -- ^ Whether to check project globally.
   -> Bool
+  -- ^ Whether to auto-fix unused imports and items.
+  -> Bool
   -- ^ Whether to format output as JSON.
   -> IO ()
-checkWith cwd filt opts p False json
-  = checkUnused opts p
-  >>= printResult json (printUnusedItems . filterUnusedItems filt . rel)
-  where rel = if json then id else relativizeUnusedItems cwd
-checkWith cwd filt opts p True json
-  = checkUnusedGlobal opts p
-  >>= printResult json (printUnused . filterUnused filt . rel)
-  where rel = if json then id else relativizeUnused cwd
+checkWith cwd filt opts p globalMode fix json
+  | fix = do
+      let mode = if globalMode then GlobalMain else Local
+      result <- checkUnusedForFix mode opts p
+      case result of
+        Left e ->
+          printResult json (printUnusedItems . filterUnusedItems filt . relItems) (Left e)
+        Right fixes ->
+          applyFixesToFiles cwd filt opts fixes p globalMode json
+  | globalMode
+      = checkUnusedGlobal opts p
+      >>= printResult json (printUnused . filterUnused filt . relUnused)
+  | otherwise
+      = checkUnused opts p
+      >>= printResult json (printUnusedItems . filterUnusedItems filt . relItems)
+  where
+    relItems = if json then id else relativizeUnusedItems cwd
+    relUnused = if json then id else relativizeUnused cwd
+
+-- | Apply fixes to files: remove unused items and delete unused imports
+-- in a single pass per file, then re-check for remaining items.
+applyFixesToFiles
+  :: FilePath -> Maybe CategoryFilter -> UnusedOptions -> [ImportFix] -> FilePath
+  -> Bool -> Bool -> IO ()
+applyFixesToFiles cwd filt opts fixes filePath globalMode json = do
+  let edits = importFixEdits fixes
+      hasEdits = not (null fixes)
+  -- Apply all edits in a single pass per file
+  _ <- mapM_ (applyFileEdits edits) (Map.keys edits)
+  -- Report what was fixed (stderr, informational)
+  _ <- unless (null fixes) $ do
+    I.hPutStrLn stderr "Fixed:"
+    mapM_ (I.hPutStrLn stderr . ("  " <>) . printImportFix) fixes
+  -- Re-check for remaining items with fresh positions
+  recheckAndReport hasEdits
+  where
+    relItems = if json then id else relativizeUnusedItems cwd
+    relUnused = if json then id else relativizeUnused cwd
+    recheckAndReport hasEdits
+      | globalMode = do
+          result <- checkUnusedGlobal opts filePath
+          let remaining = filterUnused filt <$> result
+          reportRemaining hasEdits (printUnused . relUnused) remaining
+      | otherwise = do
+          result <- checkUnused opts filePath
+          let remaining = filterUnusedItems filt <$> result
+          reportRemaining hasEdits (printUnusedItems . relItems) remaining
+    reportRemaining :: Bool -> (a -> Maybe Text) -> Either Error a -> IO ()
+    reportRemaining hasEdits printer
+      | json || not hasEdits = printResult json printer
+      | otherwise = printResult json printer'
+      where
+        printer' x = case printer x of
+          Nothing -> Nothing
+          Just t  -> Just ("Remaining issues (line numbers reflect fixed file):\n" <> t)
+
+applyFileEdits :: Map.Map FilePath [Edit] -> FilePath -> IO ()
+applyFileEdits edits path = do
+  src <- I.readFile path
+  let fixed = applyFixes src (Map.findWithDefault [] path edits)
+  I.writeFile path fixed
 
 -- ## Print
 

@@ -87,6 +87,14 @@ data RangeInfo where
     -> !QName
     -> RangeInfo
 
+  RangeRenamed
+    :: !RangeType
+    -> !QName
+    -- ^ Original name.
+    -> !QName
+    -- ^ Target name (the one in scope).
+    -> RangeInfo
+
   RangeMutual
     :: RangeInfo
 
