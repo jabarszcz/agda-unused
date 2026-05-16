@@ -135,11 +135,6 @@ data InternalError where
     :: !Range
     -> InternalError
 
-  -- | Unexpected empty top level module name.
-  ErrorModuleName
-    :: !FilePath
-    -> InternalError
-
   -- | Unexpected underscore as name.
   ErrorName
     :: !Range
