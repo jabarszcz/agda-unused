@@ -2092,7 +2092,7 @@ checkFilePath
   -> FilePath
   -> m Context
 checkFilePath n p = do
-  (module', sm) <- readModule p
+  (module', sm) <- readModule (Just n) p
   localSuppressions sm (checkModule n module')
 
 checkFileTop
@@ -2120,7 +2120,7 @@ checkFileTop'
   -- ^ The project root.
 checkFileTop' m opts p = do
   (module', sm)
-    <- readModule p
+    <- readModule Nothing p
   rawModuleName
     <- pure (rawTopLevelModuleNameForModule module')
   moduleName
@@ -2143,18 +2143,32 @@ checkFileTop' m opts p = do
 
 readModule
   :: MonadError Error m
+  => MonadState State m
   => MonadIO m
-  => FilePath
+  => Maybe QName
+  -- ^ If known, the module name (avoids a redundant parse).
+  -> FilePath
   -> m (Module, SuppressionMap)
-readModule p = do
+readModule mn p = do
   exists
     <- liftIO (doesFileExist p)
   _
     <- unless exists (throwError (ErrorFile p))
-  rangeFile
-    <- pure (RangeFile (mkAbsolute p) Nothing)
+  let absPath = mkAbsolute p
   contents
     <- liftIO (readFile p)
+  -- The Ord instance for RangeFile compares only module names, so we must
+  -- set the module name to distinguish ranges from different files with
+  -- overlapping positions (avoiding false negatives in the state map).
+  let parseName = do
+        (pre, _) <- liftIO (runPMIO (parseFile moduleParser
+                      (RangeFile absPath Nothing) contents))
+        ((m, _), _) <- liftEither (mapLeft ErrorParse pre)
+        pure (fromModuleName (rawTopLevelModuleNameForModule m))
+  moduleQName <- maybe parseName pure mn
+  modName
+    <- topLevelModuleName (rawTopLevelModuleNameForQName (toQName moduleQName))
+  let rangeFile = RangeFile absPath (Just modName)
   (parseResult, _)
     <- liftIO (runPMIO (parseFile moduleParser rangeFile contents))
   ((module', _), _)
@@ -2162,7 +2176,7 @@ readModule p = do
   (lexResult, _)
     <- liftIO (runPMIO (parseFile tokensParser rangeFile contents))
   let suppressions = case lexResult of
-        Right ((tokens, _), _) -> extractSuppressions (filePath (mkAbsolute p)) tokens
+        Right ((tokens, _), _) -> extractSuppressions (filePath absPath) tokens
         Left _                 -> mempty
   pure (module', suppressions)
 

@@ -428,6 +428,9 @@ data IntegrationTest where
   SuppressDefinition
     :: IntegrationTest
 
+  CrossFile
+    :: IntegrationTest
+
   deriving Show
 
 testDir
@@ -537,6 +540,8 @@ testFileName (Integration SuppressImport)
   = "SuppressImport"
 testFileName (Integration SuppressDefinition)
   = "SuppressDefinition"
+testFileName (Integration CrossFile)
+  = "CrossFile"
 
 testResult
   :: Test
@@ -918,6 +923,19 @@ testResult t
       ~: Postulate
     ]
 
+  -- Regression: CrossFileDep's 'true' (bytes 70–74) falls inside
+  -- CrossFile's 'open import Agda.Builtin.Bool' (bytes 45–74).
+  Integration CrossFile ->
+    [ private (name "CrossFileDep")
+      ~: Import
+    , private agdaBuiltinBool
+      ~: Import
+    , private (name "true")
+      ~: ImportItem
+    , public (name "x")
+      ~: Definition
+    ]
+
 -- ## Main
 
 main
@@ -1034,3 +1052,5 @@ testIntegration = describe "integration"
     (testCheck (Integration SuppressImport))
   >> it "checks suppression comments on definitions (SuppressDefinition)"
     (testCheck (Integration SuppressDefinition))
+  >> it "cross-file byte-position overlap does not suppress items (CrossFile)"
+    (testCheck (Integration CrossFile))
