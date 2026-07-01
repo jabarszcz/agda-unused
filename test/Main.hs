@@ -411,6 +411,9 @@ data DeclarationTest where
   Instance'
     :: DeclarationTest
 
+  CrossFile
+    :: DeclarationTest
+
   deriving Show
 
 testDir
@@ -510,6 +513,8 @@ testFileName (Declaration RecordInstance)
   = "RecordInstance"
 testFileName (Declaration Instance')
   = "Instance"
+testFileName (Declaration CrossFile)
+  = "CrossFile"
 
 testResult
   :: Test
@@ -858,6 +863,19 @@ testResult t
       ~: Definition
     ]
 
+  -- Regression: CrossFileDep's 'true' (bytes 70–74) falls inside
+  -- CrossFile's 'open import Agda.Builtin.Bool' (bytes 45–74).
+  Declaration CrossFile ->
+    [ private (name "CrossFileDep")
+      ~: Import
+    , private agdaBuiltinBool
+      ~: Import
+    , private (name "true")
+      ~: ImportItem
+    , public (name "x")
+      ~: Definition
+    ]
+
 -- ## Main
 
 main
@@ -955,6 +973,8 @@ testDeclaration
     (testCheck (Declaration RecordInstance))
   >> it "checks instance declarations (Instance)"
     (testCheck (Declaration Instance'))
+  >> it "distinguishes files"
+    (testCheck (Declaration CrossFile))
 
 testExample
   :: Spec

@@ -2078,7 +2078,7 @@ checkFilePath
   -> FilePath
   -> m Context
 checkFilePath n p
-  = readModule p
+  = readModule (Just n) p
   >>= checkModule n
 
 checkFileTop
@@ -2106,7 +2106,7 @@ checkFileTop'
   -- ^ The project root.
 checkFileTop' m opts p = do
   module'
-    <- readModule p
+    <- readModule Nothing p
   rawModuleName
     <- pure (rawTopLevelModuleNameForModule module')
   moduleName
@@ -2129,16 +2129,21 @@ checkFileTop' m opts p = do
 
 readModule
   :: MonadError Error m
+  => MonadState State m
   => MonadIO m
-  => FilePath
+  => Maybe QName
+  -- ^ The module name, if known. Only the top-level file passes Nothing.
+  -> FilePath
   -> m Module
-readModule p = do
+readModule n p = do
   exists
     <- liftIO (doesFileExist p)
   _
     <- unless exists (throwError (ErrorFile p))
+  moduleName
+    <- traverse (topLevelModuleName . rawTopLevelModuleNameForQName . toQName) n
   rangeFile
-    <- pure (RangeFile (mkAbsolute p) Nothing)
+    <- pure (RangeFile (mkAbsolute p) moduleName)
   contents
     <- liftIO (readFile p)
   (parseResult, _)
