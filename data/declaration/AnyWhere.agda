@@ -1,4 +1,4 @@
-module WhereWith where
+module AnyWhere where
 
 record Pair (A B : Set) : Set where
   field

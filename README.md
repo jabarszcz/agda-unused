@@ -149,3 +149,7 @@ Additionally, we currently do not support the following Agda features:
 
 Instance declarations are always treated as used, since determining which
 instances are selected requires type-checking.
+
+## Testing
+
+Use `cabal run test` to run the hspec test suite.

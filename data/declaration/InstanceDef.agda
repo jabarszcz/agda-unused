@@ -1,4 +1,4 @@
-module Instance where
+module InstanceDef where
 
 postulate
 

@@ -1,4 +1,4 @@
-module RecordInstance where
+module RecordModuleInstance where
 
 record R : Set₁ where
   field

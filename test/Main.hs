@@ -291,6 +291,10 @@ data Test where
     :: !DeclarationTest
     -> Test
 
+  Integration
+    :: !IntegrationTest
+    -> Test
+
   deriving Show
 
 data PatternTest where
@@ -307,6 +311,9 @@ data PatternTest where
   deriving Show
 
 data ExpressionTest where
+
+  RawApp
+    :: ExpressionTest
 
   WithApp
     :: ExpressionTest
@@ -393,26 +400,27 @@ data DeclarationTest where
   Module'
     :: DeclarationTest
 
-  OperatorSection
-    :: DeclarationTest
-
-  WhereWith
+  AnyWhere
     :: DeclarationTest
 
   LeftLet'
     :: DeclarationTest
 
-  LetPattern
+  NiceFunClause
     :: DeclarationTest
 
-  RecordInstance
+  RecordModuleInstance
     :: DeclarationTest
 
-  Instance'
+  InstanceDef
     :: DeclarationTest
+
+  deriving Show
+
+data IntegrationTest where
 
   CrossFile
-    :: DeclarationTest
+    :: IntegrationTest
 
   deriving Show
 
@@ -425,6 +433,8 @@ testDir (Expression _)
   = "expression"
 testDir (Declaration _)
   = "declaration"
+testDir (Integration _)
+  = "integration"
 
 testRootPath
   :: Test
@@ -447,6 +457,8 @@ testFileName (Pattern OpAppP)
   = "OpAppP"
 testFileName (Pattern AsP)
   = "AsP"
+testFileName (Expression RawApp)
+  = "RawApp"
 testFileName (Expression WithApp)
   = "WithApp"
 testFileName (Expression Lam)
@@ -501,19 +513,17 @@ testFileName (Declaration ModuleMacro)
   = "ModuleMacro"
 testFileName (Declaration Module')
   = "Module"
-testFileName (Declaration OperatorSection)
-  = "OperatorSection"
-testFileName (Declaration WhereWith)
-  = "WhereWith"
+testFileName (Declaration AnyWhere)
+  = "AnyWhere"
 testFileName (Declaration LeftLet')
   = "LeftLet"
-testFileName (Declaration LetPattern)
-  = "LetPattern"
-testFileName (Declaration RecordInstance)
-  = "RecordInstance"
-testFileName (Declaration Instance')
-  = "Instance"
-testFileName (Declaration CrossFile)
+testFileName (Declaration NiceFunClause)
+  = "NiceFunClause"
+testFileName (Declaration RecordModuleInstance)
+  = "RecordModuleInstance"
+testFileName (Declaration InstanceDef)
+  = "InstanceDef"
+testFileName (Integration CrossFile)
   = "CrossFile"
 
 testResult
@@ -649,6 +659,11 @@ testResult t
     , public bind_
       ~: Definition
     , public (name "f")
+      ~: Definition
+    ]
+
+  Expression RawApp ->
+    [ public (name "f")
       ~: Definition
     ]
 
@@ -808,12 +823,7 @@ testResult t
       ~: Definition
     ]
 
-  Declaration OperatorSection ->
-    [ public (name "f")
-      ~: Definition
-    ]
-
-  Declaration WhereWith ->
+  Declaration AnyWhere ->
     [ public (name "swap")
       ~: Definition
     , public (name "g")
@@ -827,7 +837,7 @@ testResult t
       ~: Definition
     ]
 
-  Declaration LetPattern ->
+  Declaration NiceFunClause ->
     [ private (name "b")
       ~: Variable
     , public (name "f")
@@ -837,7 +847,7 @@ testResult t
   -- SectionApp via explicit arg: B unused in anonymous open; M.A used.
   -- RecordModuleInstance via ⦃ ... ⦄: N.B used; two anonymous opens
   --   (one entirely unused, one with A' unused but B' used).
-  Declaration RecordInstance ->
+  Declaration RecordModuleInstance ->
     [ private (name "B")    -- SectionApp open: B not referenced
       ~: OpenItem
     , public (name "a")     -- postulate using opened A
@@ -856,7 +866,7 @@ testResult t
       ~: Postulate
     ]
 
-  Declaration Instance' ->
+  Declaration InstanceDef ->
     [ private (name "g")
       ~: Postulate
     , public (name "h")
@@ -865,7 +875,7 @@ testResult t
 
   -- Regression: CrossFileDep's 'true' (bytes 70–74) falls inside
   -- CrossFile's 'open import Agda.Builtin.Bool' (bytes 45–74).
-  Declaration CrossFile ->
+  Integration CrossFile ->
     [ private (name "CrossFileDep")
       ~: Import
     , private agdaBuiltinBool
@@ -890,6 +900,7 @@ testAll
   $ testPattern
   >> testExpression
   >> testDeclaration
+  >> testIntegration
   >> testExample
 
 testPattern
@@ -907,7 +918,9 @@ testExpression
   :: Spec
 testExpression
   = describe "expressions"
-  $ it "checks with-applications (WithApp)"
+  $ it "checks operator sections (RawApp)"
+    (testCheck (Expression RawApp))
+  >> it "checks with-applications (WithApp)"
     (testCheck (Expression WithApp))
   >> it "checks lambdas (Lam)"
     (testCheck (Expression Lam))
@@ -961,20 +974,23 @@ testDeclaration
     (testCheck (Declaration ModuleMacro))
   >> it "checks module definitions (Module)"
     (testCheck (Declaration Module'))
-  >> it "checks operator sections (OperatorSection)"
-    (testCheck (Declaration OperatorSection))
-  >> it "checks where-open in with-clauses (WhereWith)"
-    (testCheck (Declaration WhereWith))
+  >> it "checks where-open in with-clauses (AnyWhere)"
+    (testCheck (Declaration AnyWhere))
   >> it "checks left-hand side let (LeftLet)"
     (testCheck (Declaration LeftLet'))
-  >> it "checks let-patterns in type signatures (LetPattern)"
-    (testCheck (Declaration LetPattern))
-  >> it "checks record module instances (RecordInstance)"
-    (testCheck (Declaration RecordInstance))
-  >> it "checks instance declarations (Instance)"
-    (testCheck (Declaration Instance'))
-  >> it "distinguishes files"
-    (testCheck (Declaration CrossFile))
+  >> it "checks let-patterns in type signatures (NiceFunClause)"
+    (testCheck (Declaration NiceFunClause))
+  >> it "checks record module instances (RecordModuleInstance)"
+    (testCheck (Declaration RecordModuleInstance))
+  >> it "checks instance declarations (InstanceDef)"
+    (testCheck (Declaration InstanceDef))
+
+testIntegration
+  :: Spec
+testIntegration
+  = describe "integration"
+  $ it "distinguishes files"
+    (testCheck (Integration CrossFile))
 
 testExample
   :: Spec

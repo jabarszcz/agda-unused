@@ -1,4 +1,4 @@
-module OperatorSection where
+module RawApp where
 
 open import Agda.Builtin.Nat using (Nat; _+_)
 
