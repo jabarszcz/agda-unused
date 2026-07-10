@@ -89,8 +89,10 @@ import Agda.Syntax.TopLevelModuleName
   (RawTopLevelModuleName, TopLevelModuleName, projectRoot,
     rawTopLevelModuleNameForModule, rawTopLevelModuleNameForQName,
     unsafeTopLevelModuleName)
+import Agda.TypeChecking.Errors
+  (renderError, tcErrString)
 import Agda.TypeChecking.Monad.Base
-  (TCM, runTCMTop)
+  (TCErr(..), TCM, runTCMTop)
 import Agda.TypeChecking.Monad.Options
   (getIncludeDirs, setCommandLineOptions)
 import Agda.Utils.FileName
@@ -100,7 +102,7 @@ import qualified Agda.Utils.List2
 import Control.Monad
   (foldM, unless, void, when)
 import Control.Monad.Except
-  (ExceptT, MonadError, liftEither, runExceptT, throwError)
+  (ExceptT, MonadError, catchError, liftEither, runExceptT, throwError)
 import Control.Monad.IO.Class
   (MonadIO, liftIO)
 import Control.Monad.Reader
@@ -1280,7 +1282,7 @@ checkDeclarationsWith
   -> m AccessContext
 checkDeclarationsWith f c ds = do
   (fixities, _)
-    <- fixitiesAndPolarities NoWarn ds
+    <- liftEither (fixitiesAndPolarities NoWarn ds)
   (niceDeclsEither, _)
     <- pure (runNice (NiceEnv False NoWhere_) (niceDeclarations fixities ds))
   niceDecls
@@ -2118,9 +2120,10 @@ checkFileTop' m opts p = do
   rootPath
     <- pure (filePath absolutePath)
   includesEither
-    <- liftIO (runTCMTop (setOptions opts >> getIncludeDirs))
+    <- liftIO (runTCMTop ((setOptions opts >> getIncludeDirs)
+      `catchError` \e -> renderError e >>= throwError . GenericException))
   includes
-    <- liftEither (mapLeft (const ErrorInclude) includesEither)
+    <- liftEither (mapLeft (ErrorInclude . tcErrString) includesEither)
   env
     <- pure (Environment m rootPath includes)
   _

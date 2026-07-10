@@ -86,7 +86,8 @@ data Error where
 
   -- | Error in computing include paths.
   ErrorInclude
-    :: Error
+    :: !String
+    -> Error
 
   -- | Internal error; should be reported.
   ErrorInternal
@@ -201,7 +202,7 @@ data UnsupportedError where
 
 -- ## Fixity
 
-instance (Monad m, MonadError Error m) => MonadFixityError m where
+instance MonadFixityError (Either Error) where
   throwMultipleFixityDecls ((n, _) :| _)
     = throwError (ErrorFixity (Just (getRange n)))
   throwMultiplePolarityPragmas (n :| _)

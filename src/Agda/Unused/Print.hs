@@ -146,8 +146,8 @@ printError (ErrorFile p)
   = printErrorFile p
 printError (ErrorFixity Nothing)
   = "Error: Multiple fixity declarations."
-printError ErrorInclude
-  = "Error: Invalid path-related options."
+printError (ErrorInclude msg)
+  = T.pack msg
 printError (ErrorInternal e)
   = printInternalError e
 printError (ErrorParse e)
